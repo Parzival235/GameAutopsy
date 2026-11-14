@@ -99,3 +99,21 @@ footer { border-top: 1px solid var(--line); color: var(--muted); font: .74rem/1.
 #endian { background: var(--bg); color: var(--fg); border: 1px solid var(--line); padding: .4rem; }
 #hexview mark { background: var(--accent); color: #18200e; }
 .tabs { flex-wrap: wrap; }
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 135px), 1fr));
+  gap: 10px;
+}
+.detail-grid div { background: var(--bg); padding: 10px 12px; overflow-wrap: anywhere; }
+.help { color: var(--muted); }
+.pager, .offset-results { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.pager { padding-top: 14px; }
+.offset-results { list-style: none; padding: 0; }
+.table-tools select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: .56rem .65rem;
+}

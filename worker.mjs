@@ -1,5 +1,7 @@
-import { analyze, MiB, openZipMember, preview, sampleStrings } from './formats.mjs?v=0.2.0';
+import { analyze, MiB, openUnityMember, openZipMember, preview, sampleStrings } from './formats.mjs?v=0.3.0';
 import { compareArchives } from './compare.mjs';
+import { checkZip, verifyZipPayloads } from './zip-checks.mjs';
+import { searchBytes } from './byte-search.mjs';
 
 const stack = [];
 const maxDepth = 6;
@@ -23,7 +25,7 @@ function listing() {
   };
 }
 
-async function run({ action, file, index, offset }) {
+async function run({ action, file, index, offset, query, mode }) {
   switch (action) {
     case 'open':
       stack.splice(0, stack.length, await inspect(file, file.name));
@@ -31,14 +33,19 @@ async function run({ action, file, index, offset }) {
     case 'member': {
       const { blob, report } = current();
       const entry = report.rows[index];
-      if (report.format !== 'ZIP' || !entry?.open) throw new Error('That ZIP entry cannot be opened.');
+      if (!entry?.open) throw new Error('That entry cannot be opened.');
       if (stack.length >= maxDepth + 1) throw new Error('The six-level nesting limit has been reached.');
       const retained = stack.slice(1).reduce((sum, node) => sum + node.blob.size, 0);
       if (retained + entry.size > maxExpanded) throw new Error('Open entries would exceed the combined 256 MiB limit.');
-      const opened = await openZipMember(blob, entry);
-      stack.push(await inspect(opened.blob, entry.name, {
-        localHeaderOffset: entry.offset, dataOffset: opened.dataOffset, crc32: entry.crc32
-      }));
+      if (report.format === 'UnityFS') {
+        const member = await openUnityMember(blob, report, entry);
+        stack.push(await inspect(member, entry.name, { streamOffset: entry.streamOffset }));
+      } else {
+        const opened = await openZipMember(blob, entry);
+        stack.push(await inspect(opened.blob, entry.name, {
+          localHeaderOffset: entry.offset, dataOffset: opened.dataOffset, crc32: entry.crc32
+        }));
+      }
       return listing();
     }
     case 'parent':
@@ -49,6 +56,23 @@ async function run({ action, file, index, offset }) {
       const candidate = await analyze(file, file.name);
       return compareArchives(current().report, candidate);
     }
+    case 'checks': {
+      const { blob, report } = current();
+      const layout = await checkZip(blob, report);
+      report.zipChecks = { ...layout, ...(report.zipChecks?.integrity ? { integrity: report.zipChecks.integrity } : {}) };
+      return report.zipChecks;
+    }
+    case 'verify-zip': {
+      const { blob, report } = current();
+      const layout = report.zipChecks ?? await checkZip(blob, report);
+      report.zipChecks = { ...layout, integrity: await verifyZipPayloads(blob, report) };
+      return report.zipChecks;
+    }
+    case 'download': {
+      if (stack.length <= 1) throw new Error('Open an archive member first.');
+      return current().blob;
+    }
+    case 'search-bytes': return searchBytes(current().blob, query, mode, offset);
     case 'hex': return preview(current().blob, offset);
     case 'strings': return sampleStrings(current().blob);
     case 'sha256': {

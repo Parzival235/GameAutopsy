@@ -1,4 +1,6 @@
-export const version = '0.2.0';
+import { inspectAxml } from './axml.mjs';
+
+export const version = '0.3.0';
 export const MiB = 1024 * 1024;
 const maxRows = 20000;
 const maxDirectory = 24 * MiB;
@@ -35,7 +37,7 @@ const row = (name, kind, offset, size, extra = {}) => ({ name, kind, offset, siz
 
 export function identify(bytes, name = '') {
   const text = ascii(bytes.subarray(0, 8));
-  if (zipMagic(bytes) || /\.(zip|apk|apks|xapk|aab|ipa)$/i.test(name)) return 'ZIP';
+  if (zipMagic(bytes)) return 'ZIP';
   if (starts(bytes, [127, 69, 76, 70])) return 'ELF';
   if (text.startsWith('MZ')) return 'PE';
   if (text.startsWith('dex\n')) return 'DEX';
@@ -51,7 +53,7 @@ export function identify(bytes, name = '') {
   if (starts(bytes, [31, 139])) return 'GZIP';
   if (starts(bytes, [55, 122, 188, 175, 39, 28])) return '7z';
   if (starts(bytes, [0, 97, 115, 109])) return 'WebAssembly';
-  return 'Binary';
+  return /\.(zip|apk|apks|xapk|aab|ipa)$/i.test(name) ? 'ZIP' : 'Binary';
 }
 
 function extras(bytes, needs) {
@@ -188,20 +190,7 @@ export async function openZipMember(blob, entry) {
   if (entry.size > 128 * MiB || entry.packed > 128 * MiB) {
     throw new Error('The entry exceeds the 128 MiB open limit.');
   }
-  requireRange(entry.directoryOffset, entry.offset, 30);
-  const h = view(await bytesAt(blob, entry.offset, 30));
-  if (h.getUint32(0, true) !== 0x04034b50 ||
-      h.getUint16(6, true) !== entry.flags || h.getUint16(8, true) !== entry.method) {
-    throw new Error('The local header and central directory disagree.');
-  }
-  const centralHeader = view(await bytesAt(blob, entry.central, 46));
-  const nameLength = h.getUint16(26, true);
-  if (nameLength !== centralHeader.getUint16(28, true)) throw new Error('The filenames in the two ZIP headers disagree.');
-  const start = entry.offset + 30 + nameLength + h.getUint16(28, true);
-  requireRange(entry.directoryOffset, start, entry.packed);
-  const localName = await bytesAt(blob, entry.offset + 30, nameLength);
-  const centralName = await bytesAt(blob, entry.central + 46, nameLength);
-  if (!localName.every((byte, i) => byte === centralName[i])) throw new Error('The filenames in the two ZIP headers disagree.');
+  const start = await zipLocalInfo(blob, entry);
   const packed = blob.slice(start, start + entry.packed);
   let content = packed;
   if (entry.method === 8) {
@@ -228,6 +217,38 @@ export async function openZipMember(blob, entry) {
     throw new Error('The entry size or CRC32 does not match.');
   }
   return { blob: content, dataOffset: start };
+}
+
+export async function zipLocalInfo(blob, entry, boundary = entry.directoryOffset) {
+  requireRange(boundary, entry.offset, 30);
+  const h = view(await bytesAt(blob, entry.offset, 30));
+  if (h.getUint32(0, true) !== 0x04034b50 ||
+      h.getUint16(6, true) !== entry.flags || h.getUint16(8, true) !== entry.method) {
+    throw new Error('The local header and central directory disagree.');
+  }
+  const centralHeader = view(await bytesAt(blob, entry.central, 46));
+  const nameLength = h.getUint16(26, true);
+  if (nameLength !== centralHeader.getUint16(28, true)) throw new Error('The filenames in the two ZIP headers disagree.');
+  const start = entry.offset + 30 + nameLength + h.getUint16(28, true);
+  requireRange(boundary, start, entry.packed);
+  const local = await bytesAt(blob, entry.offset + 30, nameLength + h.getUint16(28, true));
+  const centralName = await bytesAt(blob, entry.central + 46, nameLength);
+  if (!centralName.every((byte, i) => byte === local[i])) throw new Error('The filenames in the two ZIP headers disagree.');
+  if (!(entry.flags & 8)) {
+    let packed = h.getUint32(18, true);
+    let size = h.getUint32(22, true);
+    const needs = [];
+    if (size === 0xffffffff) needs.push(['size', 8]);
+    if (packed === 0xffffffff) needs.push(['packed', 8]);
+    ({ size = size, packed = packed } = extras(local.subarray(nameLength), needs));
+    if (packed !== entry.packed || size !== entry.size || h.getUint32(14, true) !== entry.crc32) {
+      throw new Error('The ZIP headers disagree on size or CRC32.');
+    }
+  }
+  if (entry.method === 0 && !(entry.flags & 0x2041) && entry.packed !== entry.size) {
+    throw new Error('Stored ZIP entry has inconsistent sizes.');
+  }
+  return start;
 }
 
 async function parseDex(blob, out) {
@@ -372,9 +393,42 @@ async function parseElf(blob, out, head) {
   const sh = await table(shoff, shSize, shCount, wide ? 64 : 40);
   const field = (t, i) => wide ? u64(t, i, little) : t.getUint32(i, little);
   const va = (t, i) => hex(wide ? t.getBigUint64(i, little) : t.getUint32(i, little));
+  let loadCount = 0;
+  let unaligned = 0;
+  let invalid = 0;
   for (let i = 0; i < ph.byteLength; i += phSize) {
     const type = ph.getUint32(i, little);
-    out.rows.push(row('Segment ' + i / phSize, 'PT ' + hex(type), field(ph, i + (wide ? 8 : 4)), field(ph, i + (wide ? 32 : 16)), { address: va(ph, i + (wide ? 16 : 8)) }));
+    const offset = field(ph, i + (wide ? 8 : 4));
+    const fileSize = field(ph, i + (wide ? 32 : 16));
+    const memorySize = field(ph, i + (wide ? 40 : 20));
+    const addr = BigInt(va(ph, i + (wide ? 16 : 8)));
+    const align = BigInt(va(ph, i + (wide ? 48 : 28)));
+    const flags = ph.getUint32(i + (wide ? 4 : 24), little);
+    const permissions = (flags & 4 ? 'R' : '-') + (flags & 2 ? 'W' : '-') + (flags & 1 ? 'X' : '-');
+    let note = permissions + ' · Align ' + hex(align);
+    if (type === 1) {
+      loadCount++;
+      const valid = (align === 0n || (align & (align - 1n)) === 0n) &&
+        (align < 2n || addr % align === BigInt(offset) % align) &&
+        fileSize <= memorySize && (!fileSize || (offset <= blob.size && fileSize <= blob.size - offset));
+      if (!valid) {
+        invalid++;
+        note += ' · Invalid LOAD layout';
+      } else if (align < 16384n) {
+        unaligned++;
+        note += ' · Below 16 KiB';
+      }
+    }
+    out.rows.push(row('Segment ' + i / phSize, type === 1 ? 'PT_LOAD' : 'PT ' + hex(type), offset, fileSize, {
+      address: hex(addr), alignment: hex(align), memorySize, flags, note
+    }));
+  }
+  if (loadCount) {
+    const checkedAll = ph.byteLength / phSize === phCount;
+    out.details['LOAD segments inspected'] = loadCount;
+    out.details['ELF LOAD 16 KiB alignment'] = invalid ? 'Invalid LOAD layout' :
+      unaligned ? unaligned + ' below 16 KiB' : checkedAll ? 'All inspected LOAD segments aligned' : 'Partial program header table';
+    if (invalid) out.warnings.push('One or more ELF LOAD segments have invalid ranges or alignment.');
   }
   const nameAt = namesIndex * shSize;
   let names = new Uint8Array();
@@ -564,12 +618,45 @@ function listUnityBlocks(bytes, dataStart, dataEnd, out) {
     if (end < 0 || end - i - 20 > 4096) throw new Error('Invalid UnityFS file name.');
     requireRange(streamSize, streamOffset, size);
     const name = utf8.decode(bytes.subarray(i + 20, end));
-    out.rows.push(row(name, 'UnityFS file', null, size, { streamOffset, flags }));
+    out.rows.push(row(name, 'UnityFS file', null, size, { streamOffset, flags, open: true }));
     i = end + 1;
   }
 }
 
-function parseAndroidXml(blob, out, head) {
+export async function openUnityMember(blob, report, entry) {
+  if (entry.size > 128 * MiB) throw new Error('The UnityFS file exceeds the 128 MiB open limit.');
+  const start = entry.streamOffset;
+  const end = start + entry.size;
+  const parts = [];
+  let total = 0;
+  for (const block of report.rows) {
+    if (!entry.size) break;
+    if (block.kind !== 'UnityFS block') continue;
+    const next = block.streamOffset + block.unpackedSize;
+    if (next <= start || block.streamOffset >= end) continue;
+    const from = Math.max(start - block.streamOffset, 0);
+    const to = Math.min(end - block.streamOffset, block.unpackedSize);
+    const method = block.flags & 0x3f;
+    let part;
+    if (method === 0) {
+      if (block.size !== block.unpackedSize) throw new Error(block.name + ' has inconsistent Raw sizes.');
+      part = blob.slice(block.offset + from, block.offset + to);
+    } else if (method === 2 || method === 3) {
+      if (Math.max(block.size, block.unpackedSize) > 32 * MiB) throw new Error(block.name + ' exceeds the 32 MiB LZ4 block limit.');
+      const packed = await bytesAt(blob, block.offset, block.size);
+      const decoded = decodeLz4(packed, block.unpackedSize);
+      part = decoded.subarray(from, to);
+    } else {
+      throw new Error(block.name + ' uses unsupported compression (' + (unityCompression[method] ?? method) + ').');
+    }
+    total += to - from;
+    parts.push(part instanceof Uint8Array ? new Blob([part]) : part);
+  }
+  if (total !== entry.size) throw new Error('The UnityFS blocks do not cover the entire file.');
+  return new Blob(parts);
+}
+
+async function parseAndroidXml(blob, out, head) {
   if (head.length < 8) throw new Error('Missing XML header.');
   const d = view(head);
   const width = d.getUint16(2, true);
@@ -578,30 +665,13 @@ function parseAndroidXml(blob, out, head) {
   requireRange(blob.size, 0, size);
   out.details['Declared size'] = size;
   out.rows.push(row('XML header', 'AXML', 0, width));
-  return listXmlChunks(blob, out, width, size);
-}
-
-async function listXmlChunks(blob, out, offset, size) {
   if (size > maxDirectory) {
     out.warnings.push('The XML exceeds 24 MiB. Only the header was read.');
     return;
   }
-  const data = view(await bytesAt(blob, 0, size));
-  const labels = { 1: 'String pool', 0x100: 'Start namespace', 0x101: 'End namespace', 0x102: 'Start element', 0x103: 'End element', 0x104: 'CDATA', 0x180: 'Resource map' };
-  while (offset < size && out.rows.length < maxRows) {
-    requireRange(size, offset, 8);
-    const type = data.getUint16(offset, true);
-    const headerSize = data.getUint16(offset + 2, true);
-    const length = data.getUint32(offset + 4, true);
-    if (headerSize < 8 || length < headerSize) throw new Error('Invalid XML chunk size.');
-    requireRange(size, offset, length);
-    out.rows.push(row(labels[type] || hex(type, 4), 'AXML chunk', offset, length, {
-      headerSize, ...(type >= 0x100 && type <= 0x104 && headerSize >= 16 ? { line: data.getUint32(offset + 8, true) } : {})
-    }));
-    offset += length;
-  }
-  if (offset < size) out.warnings.push('XML output is limited to 20,000 rows.');
+  inspectAxml(await bytesAt(blob, 0, size), out);
 }
+
 
 function entropy(bytes) {
   if (!bytes.length) return null;

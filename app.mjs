@@ -3,14 +3,17 @@ import { interpretBytes } from './hex.mjs';
 const byId = id => document.getElementById(id);
 const pageSize = 80;
 const digits = new Intl.NumberFormat('en-US');
-const tabs = { structure: 'structure', hex: 'hex', compare: 'comparison', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.2.0', { type: 'module' });
+const tabs = { structure: 'structure', hex: 'hex', compare: 'comparison', checks: 'checks', find: 'find', strings: 'strings' };
+const worker = new Worker('./worker.mjs?v=0.3.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
 let comparisonPage = 0;
 let hexPage;
 let highlighted;
+let checkPage = 0;
+let nextSearch;
+let activeSearch;
 let requestId = 0;
 let busy = false;
 let workerError;
@@ -123,11 +126,7 @@ function renderRows() {
     ));
     if (entry.offset != null && entry.offset < current.report.size) {
       actions.append(actionButton('Hex', () =>
-        perform('Reading bytes…', async () => {
-          const size = entry.packed == null ? entry.size : Math.min(entry.directoryOffset - entry.offset, 30);
-          await showHex(entry.offset, size > 0 ? { start: entry.offset, end: entry.offset + size } : null);
-          setTab('hex', true);
-        })
+        jumpTo(entry.offset, entry.packed == null ? entry.size : Math.min(entry.directoryOffset - entry.offset, 30))
       ));
     }
     tr.append(actions);
@@ -146,6 +145,13 @@ function renderRows() {
   byId('pages').hidden = last === 0;
   byId('prev').disabled = page === 0;
   byId('next').disabled = page === last;
+}
+
+function jumpTo(offset, length = 0) {
+  return perform('Reading bytes…', async () => {
+    await showHex(offset, length > 0 ? { start: offset, end: offset + length } : null);
+    setTab('hex', true);
+  });
 }
 
 function setTab(tab, focus = false) {
@@ -167,6 +173,15 @@ function show(data) {
   byId('filename').textContent = report.name;
   byId('parent').hidden = path.length === 1;
   byId('compare').hidden = report.format !== 'ZIP';
+  byId('tab-checks').hidden = report.format !== 'ZIP';
+  byId('download-member').hidden = path.length === 1;
+  checkPage = 0;
+  updateChecks();
+  byId('find-start').value = '0x0';
+  byId('find-results').replaceChildren();
+  byId('find-info').textContent = 'Search up to 64 MiB per pass. Use ?? to match one byte.';
+  byId('find-more').hidden = true;
+  nextSearch = null;
   byId('tab-compare').hidden = true;
   comparison = undefined;
   hexPage = undefined;
@@ -178,7 +193,8 @@ function show(data) {
   });
   definitions(byId('details'), {
     ...details,
-    ...(source ? { 'Local header in parent': address(source.localHeaderOffset), 'Data in parent': address(source.dataOffset) } : {})
+    ...(source?.dataOffset != null ? { 'Local header in parent': address(source.localHeaderOffset), 'Data in parent': address(source.dataOffset) } : {}),
+    ...(source?.streamOffset != null ? { 'Decoded offset in parent': address(source.streamOffset) } : {})
   });
   byId('metadata').hidden = !Object.keys(details).length && !source;
   byId('warnings').replaceChildren(...report.warnings.map(message => node('li', message)));
@@ -279,6 +295,77 @@ function showComparison(result) {
   setTab('compare', true);
 }
 
+function updateChecks() {
+  const report = current.report.zipChecks;
+  byId('checks-output').hidden = !report;
+  byId('checks-stats').replaceChildren();
+  byId('checks-rows').replaceChildren();
+  byId('check-pages').hidden = true;
+  if (!report) return;
+  const { integrity } = report;
+  const findings = integrity ? [...report.checks, ...integrity.checks] : report.checks;
+  definitions(byId('checks-stats'), {
+    'Local headers checked': digits.format(report.localHeadersChecked),
+    'Stored APK entries': digits.format(report.storedApkEntries),
+    'Stored native libraries': digits.format(report.storedNativeLibraries),
+    Findings: digits.format(findings.length),
+    ...(integrity ? {
+      'CRC32 verified': digits.format(integrity.verified),
+      'CRC32 failed': digits.format(integrity.attempted - integrity.verified),
+      'CRC32 skipped in report': digits.format(integrity.skipped),
+      'Directory coverage': integrity.completeDirectory ? 'Complete' : 'Partial'
+    } : {})
+  });
+  const pages = Math.max(1, Math.ceil(findings.length / pageSize));
+  byId('check-pages').hidden = pages === 1;
+  byId('check-page').textContent = (checkPage + 1) + ' / ' + pages;
+  byId('check-prev').disabled = checkPage === 0;
+  byId('check-next').disabled = checkPage + 1 >= pages;
+  const rows = findings.slice(checkPage * pageSize, (checkPage + 1) * pageSize).map(finding => {
+    const tr = node('tr');
+    for (const value of [finding.status, finding.name, finding.message]) tr.append(node('td', value));
+    const offset = node('td');
+    if (finding.offset != null && finding.offset >= 0 && finding.offset < current.report.size) {
+      offset.append(actionButton(address(finding.offset), () => jumpTo(finding.offset)));
+    } else offset.textContent = '—';
+    tr.append(offset);
+    return tr;
+  });
+  if (!rows.length) {
+    const tr = node('tr');
+    const cell = node('td', 'No findings in the inspected layout.');
+    cell.colSpan = 4;
+    tr.append(cell);
+    rows.push(tr);
+  }
+  byId('checks-rows').replaceChildren(...rows);
+}
+
+function parseOffset(raw) {
+  const value = raw.trim();
+  if (!/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(value) || !Number.isSafeInteger(Number(value))) {
+    throw new Error('Enter a decimal or hexadecimal (0x…) offset.');
+  }
+  return Number(value);
+}
+
+function findBytes(offset, query, mode) {
+  return perform('Searching file bytes…', async () => {
+    const result = await call('search-bytes', { offset, query, mode });
+    activeSearch = { query, mode };
+    nextSearch = result.next;
+    byId('find-start').value = address(offset);
+    byId('find-more').hidden = nextSearch === null;
+    const found = result.offsets.length + (result.offsets.length === 1 ? ' match' : ' matches');
+    byId('find-info').textContent = found + ' · ' + address(result.from) + ' to ' + address(result.end) + ' (exclusive)';
+    byId('find-results').replaceChildren(...result.offsets.map(offset => {
+      const li = node('li');
+      li.append(actionButton(address(offset), () => jumpTo(offset, result.length)));
+      return li;
+    }));
+  });
+}
+
 function open(file) {
   if (file) perform('Inspecting file…', async () => {
     show(await call('open', { file }));
@@ -350,12 +437,40 @@ for (const name of Object.keys(tabs)) {
 
 byId('jump').addEventListener('submit', event => {
   event.preventDefault();
-  const raw = byId('offset').value.trim();
-  if (!/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(raw) || !Number.isSafeInteger(Number(raw))) {
-    status('Enter a decimal or hexadecimal (0x…) offset.', true);
-    return;
+  try {
+    const offset = parseOffset(byId('offset').value);
+    perform('Reading bytes…', () => showHex(offset, null));
+  } catch (error) {
+    status(error.message, true);
   }
-  perform('Reading bytes…', () => showHex(Number(raw), null));
+});
+
+byId('run-checks').addEventListener('click', () => perform('Checking ZIP layout…', async () => {
+  current.report.zipChecks = await call('checks');
+  checkPage = 0;
+  updateChecks();
+}));
+byId('verify-zip').addEventListener('click', () => perform('Verifying ZIP payloads…', async () => {
+  current.report.zipChecks = await call('verify-zip');
+  checkPage = 0;
+  updateChecks();
+}));
+byId('check-prev').addEventListener('click', () => { checkPage--; updateChecks(); });
+byId('check-next').addEventListener('click', () => { checkPage++; updateChecks(); });
+
+byId('find-form').addEventListener('submit', event => {
+  event.preventDefault();
+  try {
+    findBytes(parseOffset(byId('find-start').value), byId('find-query').value, byId('find-mode').value);
+  } catch (error) {
+    status(error.message, true);
+  }
+});
+byId('find-mode').addEventListener('change', () => {
+  byId('find-query').placeholder = byId('find-mode').value === 'hex' ? '55 6E ?? 74' : 'UnityFS';
+});
+byId('find-more').addEventListener('click', () => {
+  if (nextSearch !== null) findBytes(nextSearch, activeSearch.query, activeSearch.mode);
 });
 
 byId('hex-prev').addEventListener('click', () =>
@@ -391,8 +506,8 @@ byId('hash').addEventListener('click', () => perform('Computing SHA-256…', asy
   byId('digest').textContent = digest;
 }));
 
-function downloadJson(payload, name, suffix) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2) + '\n'], { type: 'application/json' }));
+function downloadBlob(blob, name, suffix) {
+  const url = URL.createObjectURL(blob);
   const link = node('a');
   link.href = url;
   const base = name.split(/[\\/]/).at(-1).replace(/[^\p{L}\p{N}. _-]/gu, '_').slice(0, 110) || 'file';
@@ -400,6 +515,14 @@ function downloadJson(payload, name, suffix) {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
+
+function downloadJson(payload, name, suffix) {
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2) + '\n'], { type: 'application/json' }), name, suffix);
+}
+
+byId('download-member').addEventListener('click', () => perform('Preparing download…', async () => {
+  downloadBlob(await call('download'), current.report.name, '');
+}));
 
 byId('export').addEventListener('click', () => {
   downloadJson({ ...current.report, path: current.path }, current.report.name, '.gameautopsy.json');

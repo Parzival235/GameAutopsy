@@ -6,8 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Inspect game files directly on your device.">
   <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css?v=0.2.0">
-  <script type="module" src="./app.mjs?v=0.2.0"></script>
+  <link rel="stylesheet" href="./style.css?v=0.3.0">
+  <script type="module" src="./app.mjs?v=0.3.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -42,6 +42,7 @@
       </div>
       <div class="result-actions">
         <button id="compare" class="secondary" hidden>Compare archive</button>
+        <button id="download-member" class="secondary" hidden>Save open entry ↓</button>
         <button id="export" class="secondary">Download JSON ↓</button>
       </div>
     </div>
@@ -52,6 +53,8 @@
       <button id="tab-structure" aria-selected="true" aria-controls="structure" role="tab">Structure</button>
       <button id="tab-hex" aria-selected="false" aria-controls="hex" role="tab" tabindex="-1">Hex</button>
       <button id="tab-compare" aria-selected="false" aria-controls="comparison" role="tab" tabindex="-1" hidden>Comparison</button>
+      <button id="tab-checks" aria-selected="false" aria-controls="checks" role="tab" tabindex="-1" hidden>ZIP checks</button>
+      <button id="tab-find" aria-selected="false" aria-controls="find" role="tab" tabindex="-1">Find bytes</button>
       <button id="tab-strings" aria-selected="false" aria-controls="strings" role="tab" tabindex="-1">Strings</button>
     </div>
     <section id="structure" role="tabpanel" aria-labelledby="tab-structure">
@@ -120,12 +123,41 @@
         <button id="comparison-next" class="secondary">Next →</button>
       </nav>
     </section>
+    <section id="checks" role="tabpanel" aria-labelledby="tab-checks" hidden>
+      <div class="table-tools"><button id="run-checks" class="secondary">Check ZIP layout</button>
+        <button id="verify-zip" class="secondary">Verify entry CRC32</button>
+      </div>
+      <p class="help">Checks local headers, APK payload alignment and signing-block structure. CRC32 verification reads up to 512 entries and 256 MiB of packed plus unpacked data.</p>
+      <dl id="checks-stats" class="detail-grid"></dl>
+      <div id="checks-output" class="table-wrap" hidden>
+        <table>
+          <thead><tr><th scope="col">Status</th><th scope="col">Entry or region</th><th scope="col">Finding</th><th scope="col">Offset</th></tr></thead>
+          <tbody id="checks-rows"></tbody>
+        </table>
+      </div>
+      <nav id="check-pages" class="pager" aria-label="ZIP check pages" hidden>
+        <button id="check-prev" class="secondary">← Previous</button>
+        <span id="check-page"></span>
+        <button id="check-next" class="secondary">Next →</button>
+      </nav>
+    </section>
+    <section id="find" role="tabpanel" aria-labelledby="tab-find" hidden>
+      <form id="find-form" class="table-tools">
+        <label>Mode<select id="find-mode"><option value="hex">Hex pattern</option><option value="text">UTF-8 text</option></select></label>
+        <label>Pattern<input id="find-query" type="text" maxlength="384" placeholder="55 6E ?? 74" autocomplete="off" required></label>
+        <label>Start offset<input id="find-start" value="0x0" autocomplete="off" required></label>
+        <button class="secondary">Search</button>
+        <button id="find-more" type="button" class="secondary" hidden>Continue search</button>
+      </form>
+      <p id="find-info" class="help" aria-live="polite">Search up to 64 MiB per pass. Use ?? to match one byte.</p>
+      <ul id="find-results" class="offset-results" aria-label="Match offsets"></ul>
+    </section>
     <div class="hash-line">
       <button id="hash" class="secondary">Compute SHA-256</button>
       <output id="digest"></output>
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.2.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.3.0</span></footer>
 </body>
 </html>
