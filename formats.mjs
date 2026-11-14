@@ -1,4 +1,4 @@
-export const version = '0.1.0';
+export const version = '0.2.0';
 export const MiB = 1024 * 1024;
 const maxRows = 20000;
 const maxDirectory = 24 * MiB;
@@ -8,7 +8,7 @@ const legacyZip = 'ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥�
 function requireRange(size, offset, length) {
   if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) ||
       offset < 0 || length < 0 || offset > size || length > size - offset) {
-    throw new Error('Vùng dữ liệu nằm ngoài phạm vi file hoặc vượt giới hạn số nguyên.');
+    throw new Error('Data range is outside the file or exceeds the safe integer range.');
   }
 }
 
@@ -23,7 +23,7 @@ function view(bytes) {
 
 function u64(d, offset, little = true) {
   const value = d.getBigUint64(offset, little);
-  if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Giá trị 64 bit vượt phạm vi an toàn.');
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('64-bit value exceeds the safe integer range.');
   return Number(value);
 }
 
@@ -65,7 +65,7 @@ function extras(bytes, needs) {
       const values = {};
       let next = i + 4;
       for (const [key, width] of needs) {
-        if (next + width > end) throw new Error('ZIP64 extra field bị thiếu dữ liệu.');
+        if (next + width > end) throw new Error('Truncated ZIP64 extra field.');
         values[key] = width === 8 ? u64(d, next) : d.getUint32(next, true);
         next += width;
       }
@@ -73,7 +73,7 @@ function extras(bytes, needs) {
     }
     i = end;
   }
-  if (needs.length) throw new Error('Thiếu ZIP64 extra field.');
+  if (needs.length) throw new Error('Missing ZIP64 extra field.');
   return {};
 }
 
@@ -88,12 +88,12 @@ async function zipDirectory(blob) {
     if (tail.getUint32(at, true) === 0x06054b50 &&
         at + 22 + tail.getUint16(at + 20, true) === tail.byteLength) break;
   }
-  if (at < 0) throw new Error('Không tìm thấy bản ghi kết thúc ZIP (EOCD).');
+  if (at < 0) throw new Error('ZIP end of central directory (EOCD) was not found.');
   if (tail.getUint16(at + 4, true) || tail.getUint16(at + 6, true)) {
-    throw new Error('ZIP chia nhiều đĩa chưa được hỗ trợ.');
+    throw new Error('Multi-disk ZIP archives are unsupported.');
   }
   let count = tail.getUint16(at + 10, true);
-  if (tail.getUint16(at + 8, true) !== count) throw new Error('ZIP chia nhiều đĩa chưa được hỗ trợ.');
+  if (tail.getUint16(at + 8, true) !== count) throw new Error('Multi-disk ZIP archives are unsupported.');
   let length = tail.getUint32(at + 12, true);
   let offset = tail.getUint32(at + 16, true);
   const eocd = tailOffset + at;
@@ -103,22 +103,22 @@ async function zipDirectory(blob) {
     const locator = eocd >= 20 ? view(await bytesAt(blob, eocd - 20, 20)) : null;
     if (locator?.getUint32(0, true) === 0x07064b50) {
       if (locator.getUint32(4, true) || locator.getUint32(16, true) !== 1) {
-        throw new Error('ZIP64 chia nhiều đĩa chưa được hỗ trợ.');
+        throw new Error('Multi-disk ZIP64 archives are unsupported.');
       }
       boundary = u64(locator, 8);
-      if (boundary > eocd - 76) throw new Error('ZIP64 EOCD nằm ngoài vùng hợp lệ.');
+      if (boundary > eocd - 76) throw new Error('ZIP64 EOCD is outside the expected range.');
       const record = view(await bytesAt(blob, boundary, 56));
       if (record.getUint32(0, true) !== 0x06064b50 || u64(record, 4) !== eocd - 32 - boundary) {
-        throw new Error('ZIP64 EOCD sai cấu trúc.');
+        throw new Error('Invalid ZIP64 EOCD structure.');
       }
       if (record.getUint32(16, true) || record.getUint32(20, true) ||
-          u64(record, 24) !== u64(record, 32)) throw new Error('ZIP64 chia nhiều đĩa chưa được hỗ trợ.');
+          u64(record, 24) !== u64(record, 32)) throw new Error('Multi-disk ZIP64 archives are unsupported.');
       count = u64(record, 32);
       length = u64(record, 40);
       offset = u64(record, 48);
       zip64 = true;
     } else if (length === 0xffffffff || offset === 0xffffffff) {
-      throw new Error('Thiếu ZIP64 locator.');
+      throw new Error('Missing ZIP64 locator.');
     }
   }
   requireRange(boundary, offset, length);
@@ -127,13 +127,13 @@ async function zipDirectory(blob) {
 
 async function parseZip(blob, out) {
   const { count, length, offset, eocd, zip64 } = await zipDirectory(blob);
-  Object.assign(out.details, { 'Số mục khai báo': count, 'Central directory': hex(offset), 'Kích thước danh mục': length, EOCD: hex(eocd), ZIP64: zip64 ? 'Có' : 'Không' });
+  Object.assign(out.details, { 'Declared entries': count, 'Central directory': hex(offset), 'Directory size': length, EOCD: hex(eocd), ZIP64: zip64 ? 'Yes' : 'No' });
   const data = await bytesAt(blob, offset, Math.min(length, maxDirectory));
   const d = view(data);
   let pos = 0;
   while (out.rows.length < count && out.rows.length < maxRows) {
     if (pos + 46 > data.length) break;
-    if (d.getUint32(pos, true) !== 0x02014b50) throw new Error('Central directory có chữ ký mục không hợp lệ.');
+    if (d.getUint32(pos, true) !== 0x02014b50) throw new Error('Invalid central directory entry signature.');
     const nameLength = d.getUint16(pos + 28, true);
     const extraLength = d.getUint16(pos + 30, true);
     const end = pos + 46 + nameLength + extraLength + d.getUint16(pos + 32, true);
@@ -155,17 +155,17 @@ async function parseZip(blob, out) {
     ({ size = size, packed = packed, local = local, disk = disk } = extra);
     const folder = name.endsWith('/');
     const encrypted = Boolean(flags & 0x2041);
-    out.rows.push(row(name, folder ? 'Thư mục' : encrypted ? 'Mã hóa' : method === 0 ? 'Stored' : method === 8 ? 'Deflate' : 'Method ' + method, local, size, {
-      packed, crc32: d.getUint32(pos + 16, true), central: offset + pos, flags, method,
+    out.rows.push(row(name, folder ? 'Directory' : encrypted ? 'Encrypted' : method === 0 ? 'Stored' : method === 8 ? 'Deflate' : 'Method ' + method, local, size, {
+      packed, crc32: d.getUint32(pos + 16, true), central: offset + pos, directoryOffset: offset, flags, method,
       open: !folder && !encrypted && disk === 0 && (method === 0 || method === 8)
     }));
     pos = end;
   }
   if (out.rows.length !== count) {
     if (out.rows.length === maxRows || length > maxDirectory) {
-      out.warnings.push('Danh mục vượt giới hạn 20.000 mục hoặc 24 MiB. Báo cáo chỉ chứa phần đã đọc.');
+      out.warnings.push('The directory exceeds 20,000 entries or 24 MiB. The report contains the entries read so far.');
     } else {
-      throw new Error('Central directory bị cắt ngắn hoặc sai số lượng mục.');
+      throw new Error('The central directory is truncated or its entry count is incorrect.');
     }
   }
 }
@@ -184,23 +184,24 @@ async function crcOf(blob) {
 }
 
 export async function openZipMember(blob, entry) {
-  if (!entry.open) throw new Error('Mục này không thể mở trong trình duyệt.');
+  if (!entry.open) throw new Error('This entry cannot be opened in the browser.');
   if (entry.size > 128 * MiB || entry.packed > 128 * MiB) {
-    throw new Error('Mục vượt giới hạn mở 128 MiB.');
+    throw new Error('The entry exceeds the 128 MiB open limit.');
   }
+  requireRange(entry.directoryOffset, entry.offset, 30);
   const h = view(await bytesAt(blob, entry.offset, 30));
   if (h.getUint32(0, true) !== 0x04034b50 ||
       h.getUint16(6, true) !== entry.flags || h.getUint16(8, true) !== entry.method) {
-    throw new Error('Local header và central directory không khớp.');
+    throw new Error('The local header and central directory disagree.');
   }
   const centralHeader = view(await bytesAt(blob, entry.central, 46));
   const nameLength = h.getUint16(26, true);
-  if (nameLength !== centralHeader.getUint16(28, true)) throw new Error('Tên ở hai ZIP header không khớp.');
+  if (nameLength !== centralHeader.getUint16(28, true)) throw new Error('The filenames in the two ZIP headers disagree.');
+  const start = entry.offset + 30 + nameLength + h.getUint16(28, true);
+  requireRange(entry.directoryOffset, start, entry.packed);
   const localName = await bytesAt(blob, entry.offset + 30, nameLength);
   const centralName = await bytesAt(blob, entry.central + 46, nameLength);
-  if (!localName.every((byte, i) => byte === centralName[i])) throw new Error('Tên ở hai ZIP header không khớp.');
-  const start = entry.offset + 30 + nameLength + h.getUint16(28, true);
-  requireRange(entry.central, start, entry.packed);
+  if (!localName.every((byte, i) => byte === centralName[i])) throw new Error('The filenames in the two ZIP headers disagree.');
   const packed = blob.slice(start, start + entry.packed);
   let content = packed;
   if (entry.method === 8) {
@@ -212,7 +213,7 @@ export async function openZipMember(blob, entry) {
         const { value, done } = await reader.read();
         if (done) break;
         size += value.length;
-        if (size > entry.size) throw new Error('Dữ liệu giải nén dài hơn kích thước khai báo.');
+        if (size > entry.size) throw new Error('Decompressed data exceeds the declared size.');
         parts.push(value);
       }
     } catch (error) {
@@ -224,56 +225,105 @@ export async function openZipMember(blob, entry) {
     content = new Blob(parts);
   }
   if (content.size !== entry.size || await crcOf(content) !== entry.crc32) {
-    throw new Error('Kích thước hoặc CRC32 của mục không khớp.');
+    throw new Error('The entry size or CRC32 does not match.');
   }
   return { blob: content, dataOffset: start };
 }
 
 async function parseDex(blob, out) {
-  const bytes = await bytesAt(blob, 0, 112);
-  const d = view(bytes);
-  const endian = d.getUint32(40, true);
-  if (![0x12345678, 0x78563412].includes(endian)) throw new Error('DEX endian tag không hợp lệ.');
-  const little = endian === 0x12345678;
-  const read = i => d.getUint32(i, little);
-  const dexVersion = ascii(bytes.subarray(4, 7));
-  const declared = read(32);
-  const headerSize = read(36);
-  if (headerSize < 112 || headerSize > declared || !/^\d{3}$/.test(dexVersion) || bytes[7]) {
-    throw new Error('DEX header không hợp lệ.');
+  let headerOffset = 0;
+  let containerEnd;
+  let headerCount = 0;
+  for (;;) {
+    const bytes = await bytesAt(blob, headerOffset, 112);
+    const d = view(bytes);
+    const endian = d.getUint32(40, true);
+    if (![0x12345678, 0x78563412].includes(endian)) throw new Error('Invalid DEX endian tag.');
+    const little = endian === 0x12345678;
+    const read = i => d.getUint32(i, little);
+    const dexVersion = ascii(bytes.subarray(4, 7));
+    const declared = read(32);
+    const headerSize = read(36);
+    const container = dexVersion === '041';
+    if (ascii(bytes.subarray(0, 4)) !== 'dex\n' || !/^\d{3}$/.test(dexVersion) ||
+        bytes[7] || headerSize < 112 || headerSize > declared ||
+        (headerOffset && !container)) throw new Error('Invalid DEX header.');
+    if (Number(dexVersion) > 41) {
+      out.warnings.push('This DEX version is newer than the versions supported by the structure reader.');
+      return;
+    }
+    if (headerSize !== (container ? 120 : 112)) throw new Error('Invalid DEX header size.');
+    if (container) {
+      const extra = view(await bytesAt(blob, headerOffset + 112, 8));
+      const end = extra.getUint32(0, little);
+      if (extra.getUint32(4, little) !== headerOffset || end !== (containerEnd ?? blob.size)) {
+        throw new Error('Inconsistent DEX container size or header offset.');
+      }
+      containerEnd = end;
+    } else {
+      containerEnd = declared;
+    }
+    requireRange(Math.min(containerEnd, blob.size), headerOffset, declared);
+    if (!headerCount) {
+      Object.assign(out.details, {
+        'DEX version': dexVersion, [container ? 'Container size' : 'Declared size']: containerEnd,
+        Endian: little ? 'Little' : 'Big', 'Declared Adler-32': hex(read(8), 8)
+      });
+    }
+    const logicalIndex = container ? headerCount : null;
+    out.rows.push(row('header', 'DEX', headerOffset, headerSize, container ? {
+      logicalIndex, logicalSize: declared, declaredAdler32: hex(read(8), 8)
+    } : {}));
+    await dexTables(blob, out, read, little, headerOffset, containerEnd, logicalIndex);
+    headerCount++;
+    if (container) out.details['Logical DEX files read'] = headerCount;
+    if (!container || headerOffset + declared === containerEnd) return;
+    if (headerCount === 64 || out.rows.length >= maxRows) {
+      out.warnings.push('DEX output reached its logical file or structure limit.');
+      return;
+    }
+    headerOffset += declared;
   }
-  requireRange(blob.size, 0, declared);
-  Object.assign(out.details, { 'Phiên bản DEX': dexVersion, 'Kích thước khai báo': declared, Endian: little ? 'Little' : 'Big', 'Adler-32 khai báo': hex(read(8), 8) });
-  out.rows.push(row('header', 'DEX', 0, headerSize));
-  if (Number(dexVersion) >= 41) {
-    out.warnings.push('DEX 041+ có thể dùng nhiều header trong một container. Bản này hiển thị header đầu.');
-    return;
-  }
+}
+
+async function dexTables(blob, out, read, little, start, end, logicalIndex) {
   const tables = [
     ['link data', 44, 1], ['string IDs', 56, 4], ['type IDs', 64, 4],
     ['proto IDs', 72, 12], ['field IDs', 80, 8], ['method IDs', 88, 8],
-    ['class defs', 96, 32], ['data', 104, 1]
+    ['class defs', 96, 32]
   ];
+  if (logicalIndex === null) tables.push(['data', 104, 1]);
+  const logical = logicalIndex === null ? {} : { logicalIndex };
   for (const [name, at, width] of tables) {
     const count = read(at);
     const offset = read(at + 4);
     if (!count) continue;
-    requireRange(declared, offset, count * width);
-    out.rows.push(row(name, 'Bảng DEX', offset, count * width, { count }));
+    if (out.rows.length >= maxRows) {
+      out.warnings.push('DEX table output is limited to 20,000 structure rows.');
+      return;
+    }
+    requireRange(end - start, offset - start, count * width);
+    out.rows.push(row(name, 'DEX table', offset, count * width, { count, ...logical }));
   }
   const map = read(52);
   if (!map) return;
-  requireRange(declared, map, 4);
+  requireRange(end - start, map - start, 4);
   const count = view(await bytesAt(blob, map, 4)).getUint32(0, little);
-  if (count > 4096) throw new Error('DEX map có quá nhiều mục.');
-  requireRange(declared, map, 4 + count * 12);
+  if (count > 4096) throw new Error('The DEX map has too many entries.');
+  requireRange(end - start, map - start, 4 + count * 12);
   const items = view(await bytesAt(blob, map + 4, count * 12));
-  const kinds = { 0x1000: 'map list', 0x1001: 'type lists', 0x1002: 'annotation set refs', 0x1003: 'annotation sets', 0x2000: 'class data', 0x2001: 'code items', 0x2002: 'string data', 0x2003: 'debug info', 0x2004: 'annotations', 0x2005: 'encoded arrays', 0x2006: 'annotation directories', 0xf000: 'hidden API data' };
+  const kinds = { 0: 'header', 1: 'string IDs', 2: 'type IDs', 3: 'proto IDs', 4: 'field IDs', 5: 'method IDs', 6: 'class defs', 7: 'call site IDs', 8: 'method handles', 0x1000: 'map list', 0x1001: 'type lists', 0x1002: 'annotation set refs', 0x1003: 'annotation sets', 0x2000: 'class data', 0x2001: 'code items', 0x2002: 'string data', 0x2003: 'debug info', 0x2004: 'annotations', 0x2005: 'encoded arrays', 0x2006: 'annotation directories', 0xf000: 'hidden API data' };
   for (let i = 0; i < count * 12; i += 12) {
+    if (out.rows.length >= maxRows) {
+      out.warnings.push('DEX map output is limited to 20,000 structure rows.');
+      break;
+    }
     const type = items.getUint16(i, little);
     const offset = items.getUint32(i + 8, little);
-    if (offset >= declared) throw new Error('Offset trong DEX map nằm ngoài file.');
-    out.rows.push(row(kinds[type] || 'type ' + hex(type, 4), 'DEX map', offset, null, { count: items.getUint32(i + 4, little) }));
+    requireRange(end - start, offset - start, 1);
+    out.rows.push(row(kinds[type] || 'type ' + hex(type, 4), 'DEX map', offset, null, {
+      count: items.getUint32(i + 4, little), ...logical
+    }));
   }
 }
 
@@ -286,7 +336,7 @@ function cstr(bytes, start, limit = bytes.length) {
 
 async function parseElf(blob, out, head) {
   if (![1, 2].includes(head[4]) || ![1, 2].includes(head[5]) || head[6] !== 1) {
-    throw new Error('ELF class, endianness hoặc phiên bản không hợp lệ.');
+    throw new Error('Invalid ELF class, endianness or version.');
   }
   const wide = head[4] === 2;
   const little = head[5] === 1;
@@ -309,13 +359,13 @@ async function parseElf(blob, out, head) {
     if (phCount === 65535) phCount = first.getUint32(wide ? 44 : 28, little);
     if (namesIndex === 65535) namesIndex = first.getUint32(wide ? 40 : 24, little);
   }
-  Object.assign(out.details, { 'Kiến trúc': arch[machine] || hex(machine), Bit: wide ? 64 : 32, Endian: little ? 'Little' : 'Big', 'Entry VA': address(24), Segment: phCount, Section: shCount });
+  Object.assign(out.details, { 'Architecture': arch[machine] || hex(machine), Bit: wide ? 64 : 32, Endian: little ? 'Little' : 'Big', 'Entry VA': address(24), Segment: phCount, Section: shCount });
   const table = async (offset, size, count, minimum) => {
     if (!count) return new DataView(new ArrayBuffer(0));
-    if (size < minimum) throw new Error('Kích thước bản ghi ELF không hợp lệ.');
+    if (size < minimum) throw new Error('Invalid ELF record size.');
     requireRange(blob.size, offset, count * size);
     const limit = Math.min(maxRows, Math.floor(maxDirectory / size));
-    if (count > limit) out.warnings.push('Một bảng ELF vượt giới hạn và đã được cắt bớt.');
+    if (count > limit) out.warnings.push('An ELF table exceeded the display limit and was truncated.');
     return view(await bytesAt(blob, offset, Math.min(count, limit) * size));
   };
   const ph = await table(phoff, phSize, phCount, wide ? 56 : 32);
@@ -331,7 +381,7 @@ async function parseElf(blob, out, head) {
   if (namesIndex && nameAt + shSize <= sh.byteLength) {
     const size = field(sh, nameAt + (wide ? 32 : 20));
     if (size <= maxDirectory) names = await bytesAt(blob, field(sh, nameAt + (wide ? 24 : 16)), size);
-    else out.warnings.push('Bảng tên section vượt giới hạn 24 MiB.');
+    else out.warnings.push('The section name table exceeds 24 MiB.');
   }
   for (let i = 0; i < sh.byteLength && out.rows.length < maxRows; i += shSize) {
     const type = sh.getUint32(i + 4, little);
@@ -339,25 +389,25 @@ async function parseElf(blob, out, head) {
     const size = field(sh, i + (wide ? 32 : 20));
     out.rows.push(row(name, 'SHT ' + hex(type), type === 8 ? null : field(sh, i + (wide ? 24 : 16)), size, { address: va(sh, i + (wide ? 16 : 12)) }));
   }
-  if (phCount + shCount > maxRows) out.warnings.push('Bảng cấu trúc đã giới hạn ở 20.000 hàng.');
+  if (phCount + shCount > maxRows) out.warnings.push('Structure output is limited to 20,000 rows.');
 }
 
 async function parsePe(blob, out, head) {
-  if (head.length < 64) throw new Error('Thiếu DOS header.');
+  if (head.length < 64) throw new Error('Missing DOS header.');
   const at = view(head).getUint32(60, true);
   const d = view(await bytesAt(blob, at, 24));
-  if (d.getUint32(0, true) !== 0x4550) throw new Error('Không tìm thấy chữ ký PE.');
+  if (d.getUint32(0, true) !== 0x4550) throw new Error('PE signature was not found.');
   const count = d.getUint16(6, true);
   const optSize = d.getUint16(20, true);
   const opt = view(await bytesAt(blob, at + 24, optSize));
   const magic = optSize >= 2 ? opt.getUint16(0, true) : 0;
   const wide = magic === 0x20b;
   const dirStart = wide ? 112 : 96;
-  if ((!wide && magic !== 0x10b) || optSize < dirStart) throw new Error('PE optional header không được hỗ trợ hoặc bị cắt ngắn.');
+  if ((!wide && magic !== 0x10b) || optSize < dirStart) throw new Error('The PE optional header is unsupported or truncated.');
   const machine = d.getUint16(4, true);
   const arch = { 332: 'x86', 34404: 'x86-64', 452: 'ARM', 43620: 'ARM64' };
-  Object.assign(out.details, { 'Kiến trúc': arch[machine] || hex(machine), 'Optional header': wide ? 'PE32+' : 'PE32', 'Entry RVA': hex(opt.getUint32(16, true)), 'Image base': hex(wide ? opt.getBigUint64(24, true) : opt.getUint32(28, true)), Section: count });
-  if (count > maxRows) throw new Error('Số section PE vượt giới hạn.');
+  Object.assign(out.details, { 'Architecture': arch[machine] || hex(machine), 'Optional header': wide ? 'PE32+' : 'PE32', 'Entry RVA': hex(opt.getUint32(16, true)), 'Image base': hex(wide ? opt.getBigUint64(24, true) : opt.getUint32(28, true)), Section: count });
+  if (count > maxRows) throw new Error('The PE section count exceeds the limit.');
   out.rows.push(row('PE headers', 'PE', at, 24 + optSize + count * 40));
   const table = await bytesAt(blob, at + 24 + optSize, count * 40);
   const s = view(table);
@@ -373,7 +423,7 @@ async function parsePe(blob, out, head) {
   const dirs = ['Export', 'Import', 'Resource', 'Exception', 'Certificate', 'Relocation', 'Debug', 'Architecture', 'Global ptr', 'TLS', 'Load config', 'Bound import', 'IAT', 'Delay import', 'CLR', 'Reserved'];
   const declared = opt.getUint32(dirStart - 4, true);
   const available = Math.floor((optSize - dirStart) / 8);
-  if (declared > available) out.warnings.push('Số data directory khai báo vượt kích thước optional header.');
+  if (declared > available) out.warnings.push('The declared data directory count exceeds the optional header size.');
   for (let i = 0; i < Math.min(declared, available, dirs.length); i++) {
     const address = opt.getUint32(dirStart + i * 8, true);
     const size = opt.getUint32(dirStart + i * 8 + 4, true);
@@ -384,11 +434,50 @@ async function parsePe(blob, out, head) {
   }
 }
 
-function parseUnity(blob, out, head) {
+const unityCompression = ['Raw', 'LZMA', 'LZ4', 'LZ4HC', 'LZHAM'];
+const align16 = n => Math.ceil(n / 16) * 16;
+
+function decodeLz4(input, size) {
+  const output = new Uint8Array(size);
+  let read = 0;
+  let written = 0;
+  const length = initial => {
+    if (initial !== 15) return initial;
+    let total = initial;
+    let next;
+    do {
+      if (read === input.length) throw new Error('Truncated LZ4 length.');
+      next = input[read++];
+      total += next;
+    } while (next === 255);
+    return total;
+  };
+  while (read < input.length) {
+    const token = input[read++];
+    const literal = length(token >> 4);
+    if (literal > input.length - read || literal > size - written) throw new Error('Invalid LZ4 literal range.');
+    output.set(input.subarray(read, read + literal), written);
+    read += literal;
+    written += literal;
+    if (read === input.length) {
+      if (written === size) return output;
+      break;
+    }
+    if (input.length - read < 2) throw new Error('Truncated LZ4 match offset.');
+    const distance = input[read] | (input[read + 1] << 8);
+    read += 2;
+    const match = length(token & 15) + 4;
+    if (!distance || distance > written || match > size - written) throw new Error('Invalid LZ4 match range.');
+    for (let i = 0; i < match; i++, written++) output[written] = output[written - distance];
+  }
+  throw new Error('LZ4 output does not match the declared size.');
+}
+
+async function parseUnity(blob, out, head) {
   const first = head.indexOf(0, 12);
   const second = head.indexOf(0, first + 1);
   if (first < 12 || second < 0 || second + 21 > head.length) {
-    throw new Error('UnityFS header bị cắt ngắn hoặc vượt 512 byte.');
+    throw new Error('The UnityFS header is truncated or exceeds 512 bytes.');
   }
   const d = view(head);
   const version = d.getUint32(8);
@@ -396,37 +485,105 @@ function parseUnity(blob, out, head) {
   const packed = d.getUint32(second + 9);
   const unpacked = d.getUint32(second + 13);
   const flags = d.getUint32(second + 17);
+  const engine = cstr(head, first + 1);
+  const engineVersion = /^(\d+)\.(\d+)\.(\d+)/.exec(engine)?.slice(1).map(Number);
+  const [major, minor, patch] = engineVersion ?? [];
+  const oldFlags = major < 2020 || (major === 2020 && (minor < 3 || (minor === 3 && patch < 34))) ||
+    (major === 2021 && (minor < 3 || (minor === 3 && patch < 2))) ||
+    (major === 2022 && (minor < 1 || (minor === 1 && patch < 1)));
   const end = second + 21;
-  const headSize = version >= 7 ? Math.ceil(end / 16) * 16 : end;
+  const headSize = version >= 7 || (major === 2019 && (minor > 4 || (minor === 4 && patch >= 15))) ? align16(end) : end;
   requireRange(blob.size, 0, size);
+  requireRange(size, 0, headSize);
   const fromEnd = Boolean(flags & 0x80);
-  const directory = fromEnd ? size - packed : headSize;
-  requireRange(size, directory, packed);
-  if (directory < headSize) throw new Error('Danh mục UnityFS chồng lên header.');
+  const method = flags & 0x3f;
   Object.assign(out.details, {
-    'Phiên bản format': version, 'Phiên bản player': cstr(head, 12), 'Phiên bản engine': cstr(head, first + 1),
-    'Kích thước khai báo': size, 'Kích thước danh mục sau giải nén': unpacked,
-    'Nén danh mục': ['Raw', 'LZMA', 'LZ4', 'LZ4HC', 'LZHAM'][flags & 0x3f] ?? (flags & 0x3f),
+    'Format version': version, 'Player version': cstr(head, 12), 'Engine version': engine,
+    'Declared size': size, 'Decoded directory size': unpacked, 'Directory compression': unityCompression[method] ?? method,
     Flags: hex(flags)
   });
-  out.rows.push(row('Header', 'UnityFS', 0, headSize), row('Blocks info', 'Danh mục UnityFS', directory, packed));
+  out.rows.push(row('Header', 'UnityFS', 0, headSize));
+  if (version < 6 || version > 8 || !(flags & 0x40) || flags & (oldFlags ? 0x200 : 0x1400) ||
+      (!engineVersion && flags & 0x200)) {
+    out.warnings.push('The UnityFS directory layout or flags are unsupported. Only the header was read.');
+    return;
+  }
+  const directory = fromEnd ? size - packed : headSize;
+  requireRange(size, directory, packed);
+  if (directory < headSize) throw new Error('The UnityFS directory overlaps the header.');
+  out.rows.push(row('Blocks info', 'UnityFS directory', directory, packed));
+  if (![0, 2, 3].includes(method) || Math.max(packed, unpacked) > maxDirectory) {
+    out.warnings.push('The UnityFS directory uses an unsupported compression method or exceeds 24 MiB.');
+    return;
+  }
+  const payload = await bytesAt(blob, directory, packed);
+  const table = method ? decodeLz4(payload, unpacked) : payload;
+  if (table.length !== unpacked) throw new Error('The UnityFS directory size does not match the header.');
+  let dataStart = fromEnd ? headSize : directory + packed;
+  if (!oldFlags && flags & 0x200) dataStart = align16(dataStart);
+  listUnityBlocks(table, dataStart, fromEnd ? directory : size, out);
+}
+
+function listUnityBlocks(bytes, dataStart, dataEnd, out) {
+  const d = view(bytes);
+  requireRange(bytes.length, 0, 20);
+  const blocks = d.getUint32(16);
+  requireRange(bytes.length, 20, blocks * 10 + 4);
+  if (blocks > maxRows - out.rows.length) {
+    out.warnings.push('The UnityFS block count exceeds the structure limit.');
+    return;
+  }
+  let streamSize = 0;
+  let offset = dataStart;
+  let i = 20;
+  for (let block = 0; block < blocks; block++, i += 10) {
+    const decoded = d.getUint32(i);
+    const packed = d.getUint32(i + 4);
+    const flags = d.getUint16(i + 8);
+    requireRange(dataEnd, offset, packed);
+    out.rows.push(row('Block ' + block, 'UnityFS block', offset, packed, {
+      streamOffset: streamSize, unpackedSize: decoded, flags,
+      note: (unityCompression[flags & 0x3f] ?? 'Unknown compression') + ' · ' + decoded + ' decoded bytes'
+    }));
+    offset += packed;
+    streamSize += decoded;
+  }
+  const entries = d.getUint32(i);
+  Object.assign(out.details, { 'Declared blocks': blocks, 'Declared files': entries, 'Decoded stream size': streamSize });
+  i += 4;
+  for (let entry = 0; entry < entries; entry++) {
+    if (out.rows.length === maxRows) {
+      out.warnings.push('The UnityFS file list reached the structure limit.');
+      return;
+    }
+    requireRange(bytes.length, i, 21);
+    const streamOffset = u64(d, i, false);
+    const size = u64(d, i + 8, false);
+    const flags = d.getUint32(i + 16);
+    const end = bytes.indexOf(0, i + 20);
+    if (end < 0 || end - i - 20 > 4096) throw new Error('Invalid UnityFS file name.');
+    requireRange(streamSize, streamOffset, size);
+    const name = utf8.decode(bytes.subarray(i + 20, end));
+    out.rows.push(row(name, 'UnityFS file', null, size, { streamOffset, flags }));
+    i = end + 1;
+  }
 }
 
 function parseAndroidXml(blob, out, head) {
-  if (head.length < 8) throw new Error('Thiếu XML header.');
+  if (head.length < 8) throw new Error('Missing XML header.');
   const d = view(head);
   const width = d.getUint16(2, true);
   const size = d.getUint32(4, true);
-  if (width < 8 || width > size) throw new Error('Header XML không hợp lệ.');
+  if (width < 8 || width > size) throw new Error('Invalid XML header.');
   requireRange(blob.size, 0, size);
-  out.details['Kích thước khai báo'] = size;
+  out.details['Declared size'] = size;
   out.rows.push(row('XML header', 'AXML', 0, width));
   return listXmlChunks(blob, out, width, size);
 }
 
 async function listXmlChunks(blob, out, offset, size) {
   if (size > maxDirectory) {
-    out.warnings.push('XML vượt giới hạn 24 MiB. Chỉ đọc header.');
+    out.warnings.push('The XML exceeds 24 MiB. Only the header was read.');
     return;
   }
   const data = view(await bytesAt(blob, 0, size));
@@ -436,14 +593,14 @@ async function listXmlChunks(blob, out, offset, size) {
     const type = data.getUint16(offset, true);
     const headerSize = data.getUint16(offset + 2, true);
     const length = data.getUint32(offset + 4, true);
-    if (headerSize < 8 || length < headerSize) throw new Error('XML chunk sai kích thước.');
+    if (headerSize < 8 || length < headerSize) throw new Error('Invalid XML chunk size.');
     requireRange(size, offset, length);
     out.rows.push(row(labels[type] || hex(type, 4), 'AXML chunk', offset, length, {
       headerSize, ...(type >= 0x100 && type <= 0x104 && headerSize >= 16 ? { line: data.getUint32(offset + 8, true) } : {})
     }));
     offset += length;
   }
-  if (offset < size) out.warnings.push('Bảng XML đã giới hạn ở 20.000 hàng.');
+  if (offset < size) out.warnings.push('XML output is limited to 20,000 rows.');
 }
 
 function entropy(bytes) {
@@ -469,9 +626,9 @@ export async function analyze(blob, name) {
   };
   const sample = Math.min(blob.size, 64 * 1024);
   if (sample) {
-    out.details['Entropy đầu file (bit/byte)'] = entropy(await bytesAt(blob, 0, sample));
-    out.details['Entropy cuối file (bit/byte)'] = entropy(await bytesAt(blob, blob.size - sample, sample));
-    out.details['Kích thước mỗi mẫu entropy'] = sample;
+    out.details['Head entropy (bits/byte)'] = entropy(await bytesAt(blob, 0, sample));
+    out.details['Tail entropy (bits/byte)'] = entropy(await bytesAt(blob, blob.size - sample, sample));
+    out.details['Entropy sample size'] = sample;
   }
   try {
     switch (format) {
@@ -479,18 +636,18 @@ export async function analyze(blob, name) {
       case 'DEX': await parseDex(blob, out); break;
       case 'ELF': await parseElf(blob, out, head); break;
       case 'PE': await parsePe(blob, out, head); break;
-      case 'UnityFS': parseUnity(blob, out, head); break;
+      case 'UnityFS': await parseUnity(blob, out, head); break;
       case 'Android binary XML': await parseAndroidXml(blob, out, head); break;
       case 'Godot PCK':
         if (head.length >= 20) {
           const d = view(head);
-          out.details['Phiên bản format'] = d.getUint32(4, true);
-          out.details['Phiên bản engine'] = [8, 12, 16].map(at => d.getUint32(at, true)).join('.');
-        } else throw new Error('Thiếu PCK header.');
+          out.details['Format version'] = d.getUint32(4, true);
+          out.details['Engine version'] = [8, 12, 16].map(at => d.getUint32(at, true)).join('.');
+        } else throw new Error('Missing PCK header.');
         break;
       case 'IL2CPP metadata':
-        if (head.length < 8) throw new Error('Thiếu IL2CPP header.');
-        out.details['Phiên bản metadata'] = view(head).getUint32(4, true);
+        if (head.length < 8) throw new Error('Missing IL2CPP header.');
+        out.details['Metadata version'] = view(head).getUint32(4, true);
         break;
       default: break;
     }

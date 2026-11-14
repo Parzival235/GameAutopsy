@@ -1,47 +1,68 @@
 # GameAutopsy
 
-Trình đọc cấu trúc file game chạy trên thiết bị. Mở [GameAutopsy trên GitHub Pages](https://parzival235.github.io/GameAutopsy/), kéo file vào trang rồi chọn vùng cần xem. Dùng **Mở** để đi vào một mục ZIP, **Hex** để nhảy tới offset và **Tải báo cáo JSON** để lưu phân tích của file đang xem.
+GameAutopsy is a read-only game-file inspector that runs in your browser. Open the [GitHub Pages app](https://parzival235.github.io/GameAutopsy/) and drop in a file from your device. The app reads locally, processes the file in a Web Worker, and downloads reports on request.
 
-| Định dạng | Dữ liệu đọc được |
+## Inspect a file
+
+1. Choose a file or drag it onto the page.
+2. In **Structure**, search for a path, type, or offset. Use **Open** on a ZIP entry to inspect its contents, or **Hex** to highlight its range in the current file. For ZIP entries, this shortcut highlights the fixed part of the local header.
+3. In **Hex**, use a decimal or hexadecimal offset, step through 256-byte pages, or interpret the bytes at the current offset as signed integers, unsigned integers, or floats in either byte order.
+4. Use **Strings**, **Compute SHA-256**, or **Download JSON** on the current file. A JSON report includes the string sample and SHA-256 if you computed them before downloading.
+
+| Format | What GameAutopsy reads |
 | --- | --- |
-| ZIP, APK, APKS, XAPK, AAB, IPA, OBB có chữ ký ZIP | Central directory và ZIP64 một đĩa, cờ, phương thức nén, kích thước, CRC32 và offset local header. Mở mục Stored hoặc Deflate và xác minh CRC32 khi đọc. |
-| DEX | Header, bảng ID và định nghĩa lớp, DEX map. DEX 041 trở lên hiển thị header đầu. |
-| ELF 32/64 | Entry VA, segment, section, kiến trúc, endianness và offset trong file. |
-| PE32 / PE32+ | Kiến trúc, entry RVA, image base, section và data directory. |
-| UnityFS | Phiên bản engine, kích thước bundle, kiểu nén và vị trí vùng blocks info. |
-| Android binary XML | Loại, kích thước, offset và số dòng của chunk khi có. |
-| Godot PCK / IL2CPP metadata | Nhận dạng chữ ký và một số trường đầu file. |
-| Mọi file | Hex, entropy ở hai đầu, mẫu chuỗi ASCII/UTF-16LE, SHA-256 theo yêu cầu. |
+| ZIP, APK, APKS, XAPK, AAB, IPA, ZIP-based OBB | Single-disk ZIP and ZIP64 central directories. Open nested Stored or Deflate entries with CRC32 and size checks. |
+| DEX | Headers, ID tables, class definition tables and map entries. DEX 041 containers can contain multiple logical files with offsets relative to the physical file. |
+| ELF 32/64 | Architecture, byte order, entry address, segments, sections and file offsets. |
+| PE32 / PE32+ | Architecture, entry RVA, image base, sections and data directories. |
+| UnityFS 6–8 | Header, block table and file directory for standard Raw, LZ4 and LZ4HC directories. Shows packed blocks and decoded file offsets. |
+| Android binary XML | Chunk types, sizes, offsets and source lines when present. |
+| Godot PCK / IL2CPP metadata | Signature and selected header fields. |
+| Any file | Hex, typed values, entropy samples, ASCII and UTF-16LE string samples, and optional SHA-256. |
 
-Offset tính từ đầu file đang xem. Offset của một mục ZIP trong bảng trỏ tới local header của mục đó. Khi mở mục, phần **Chi tiết định dạng và nguồn** cho biết offset của local header và offset bắt đầu dữ liệu trong gói cha. Các cột offset và kích thước báo cáo JSON dùng byte và số hệ 10. Địa chỉ ảo được ghi dưới dạng chuỗi hex. Mỗi báo cáo ghi rõ đường dẫn qua các lớp gói, cảnh báo và số vùng thực tế đã đọc.
+Offsets use bytes from the start of the current file unless labeled otherwise. ZIP structure offsets point to local headers. After opening an entry, **Format and source details** gives the local header and payload offsets in the parent archive. UnityFS file entries have a separate `streamOffset` into the decoded stream, while UnityFS block offsets point into the original bundle.
 
-## Dữ liệu và giới hạn
+## Compare two releases
 
-- Trang chỉ tải HTML, CSS và JavaScript từ nơi chứa trang. Công cụ đọc file chỉ đọc bằng File API, xử lý bằng Web Worker và tạo báo cáo ngay trên thiết bị. File gốc, tên file và báo cáo không được truyền qua mạng. Không có backend, analytics hay thư viện từ CDN.
-- Muốn mở cả trang khi mất mạng, tải mã nguồn rồi phục vụ trên localhost. Trang tải từ Pages vẫn cần kết nối khi tải lại.
-- Danh mục ZIP có giới hạn 20.000 mục và 24 MiB dữ liệu danh mục. Mở tối đa 6 tầng gói lồng nhau, 128 MiB mỗi mục và 256 MiB cho các mục đang mở. Hash toàn file hỗ trợ đến 256 MiB. Chuỗi được lấy từ 4 MiB đầu, tối đa 500 kết quả.
-- Công cụ đọc cấu trúc tĩnh. DEX ở mức bảng, UnityFS ở mức header và vùng danh mục. ZIP mã hóa, ZIP chia đĩa và phương thức nén khác Stored/Deflate hiện chưa mở được.
+Open the older ZIP-based package, then choose **Compare archive** and pick the newer package. The comparison reads both central directories and shows added or removed paths, content metadata changes, packing changes, moved offsets, duplicate paths, and encrypted entries that need separate inspection.
 
-## Chạy từ bản fork hoặc bản tải xuống
+The packed delta is the change in an entry's compressed payload size, excluding headers and padding. The comparison uses declared uncompressed sizes and CRC32 values to classify likely content differences. Use SHA-256 on an opened entry when you need a stronger equality check. Comparison is scoped to the current ZIP level and can be downloaded as JSON.
 
-Cần trình duyệt hiện đại hỗ trợ Web Worker dạng module, Web Crypto và `DecompressionStream('deflate-raw')`. Tại thư mục repo, chạy lệnh sau rồi mở [http://localhost:8000](http://localhost:8000).
+## Privacy and limits
+
+- Files and reports stay on the device. There is no backend, telemetry, or CDN dependency. To launch the app without internet access, serve a downloaded copy on localhost.
+- ZIP directories are limited to 20,000 entries or 24 MiB of directory data. ZIP comparison requires two complete directories. Encrypted, split, and unsupported compression formats remain visible as metadata when the directory can be read.
+- Nested ZIPs support six levels, up to 128 MiB per opened entry and 256 MiB total for entries held open. Whole-file SHA-256 supports up to 256 MiB. The string sampler scans the first 4 MiB and returns up to 500 results.
+- UnityFS inspection inventories blocks and files. Extraction and serialized asset decoding are outside this release. LZMA and encrypted UnityFS directories are reported as unsupported.
+- DEX inspection lists structures at the table level. DEX 041 traversal is limited to 64 logical headers and the overall structure row cap. Unknown future versions and malformed structures are reported with warnings.
+
+## Run your own copy
+
+Use a browser with module workers, Web Crypto, and `DecompressionStream('deflate-raw')`. In the repository directory, run the following and visit [localhost:8000](http://localhost:8000).
 
 ```sh
 python3 -m http.server 8000 --bind 127.0.0.1
 ```
 
-Windows có thể dùng `py -3` thay cho `python3`. Khi bật Pages cho bản fork, chọn **Settings → Pages → Deploy from a branch → main → /(root)**.
+On Windows, use `py -3` in place of `python3`. To publish a fork with GitHub Pages, select **Settings → Pages → Deploy from a branch → main → /(root)**.
 
-## Phát triển
+## Development
 
-`index.html` và `app.mjs` điều khiển giao diện, `worker.mjs` đọc file và quản lý các lớp gói, `formats.mjs` chứa các bộ đọc. Chạy kiểm thử với Node.js 22 trở lên.
+Run the generated-fixture tests with Node.js 22 or later.
 
 ```sh
 node --test tests/*.test.mjs
 ```
 
-Tài liệu định dạng [ZIP](https://support.pkware.com/pkzip/appnote), [DEX](https://source.android.com/docs/core/runtime/dex-format), [ELF](https://gabi.xinuos.com/elf/), [PE](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format) và [UnityFS](https://reverseengineering.wiki/index.php/Format:Unity_asset_bundle_(UnityFS)).
+| Reference tool | What informed this release |
+| --- | --- |
+| [Android Studio APK Analyzer](https://developer.android.com/studio/debug/apk-analyzer#compare) | Compare package releases entry by entry and show size deltas. |
+| [ImHex](https://github.com/WerWolv/ImHex#features) | Interpret the same bytes with different widths and byte orders. |
+| [Kaitai Struct Web IDE](https://kaitai.io/news/2024/02/21/web-ide-improvements.html) | Link structure rows to byte ranges and preserve parsed rows when a later record fails. |
+| [AssetRipper](https://github.com/AssetRipper/AssetRipper) and [UnityPy](https://github.com/K0lb3/UnityPy) | Identify the difference between bundle storage, the decoded stream, and serialized assets. |
 
-## Giấy phép
+Format references include [ZIP](https://support.pkware.com/pkzip/appnote), [DEX](https://source.android.com/docs/core/runtime/dex-format), [ELF](https://gabi.xinuos.com/elf/), [PE](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format), [UnityFS](https://reverseengineering.wiki/index.php/Format:Unity_asset_bundle_(UnityFS)), and [LZ4](https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md).
 
-Mã nguồn được phát hành theo [Mozilla Public License 2.0](LICENSE). Khi phân phối lại các tệp được cấp phép, giữ thông báo giấy phép và cung cấp mã nguồn của các tệp được cấp phép đã sửa theo MPL. Công cụ phân tích riêng có thể chạy độc lập từ máy.
+## License
+
+[Mozilla Public License 2.0](LICENSE).

@@ -81,3 +81,21 @@ footer { border-top: 1px solid var(--line); color: var(--muted); font: .74rem/1.
   .chip { display: none; }
   .primary { margin-left: 0; }
 }
+.result-actions, .hex-controls, #comparison-pages {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.hex-controls, #comparison-pages { color: var(--muted); }
+#comparison-pages { padding-top: 14px; }
+#comparison-path, #comparison-note { color: var(--muted); overflow-wrap: anywhere; }
+#comparison-stats, #values {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 135px), 1fr));
+  gap: 10px;
+}
+#comparison-stats div, #values div { background: var(--bg); padding: 10px 12px; overflow-wrap: anywhere; }
+#endian { background: var(--bg); color: var(--fg); border: 1px solid var(--line); padding: .4rem; }
+#hexview mark { background: var(--accent); color: #18200e; }
+.tabs { flex-wrap: wrap; }

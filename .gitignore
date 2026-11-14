@@ -16,3 +16,4 @@
 /private/
 /samples/
 /reports/
+*.gameautopsy-comparison.json

@@ -61,7 +61,7 @@ test('ZIP Stored, Deflate and ZIP64 preserve offsets and verified bytes', async 
     assert.equal(report.rows.length, 1);
     assert.equal(report.rows[0].offset, 0);
     assert.equal(report.rows[0].size, 5);
-    assert.equal(report.details.ZIP64, options.zip64 ? 'Có' : 'Không');
+    assert.equal(report.details.ZIP64, options.zip64 ? 'Yes' : 'No');
     const result = await openZipMember(file, report.rows[0]);
     assert.equal(result.dataOffset, 39);
     assert.equal(await result.blob.text(), 'hello');
@@ -116,7 +116,7 @@ test('ELF section names and file offsets are read from the section table', async
   elf.writeBigUInt64LE(11n, 160);
   elf.write('\0.shstrtab\0', 192);
   const report = await analyze(new Blob([elf]), 'game.so');
-  assert.equal(report.details['Kiến trúc'], 'x86-64');
+  assert.equal(report.details['Architecture'], 'x86-64');
   assert.equal(report.rows[1].name, '.shstrtab');
   assert.equal(report.rows[1].offset, 192);
 });
@@ -128,4 +128,76 @@ test('hex handles empty files and string scanning finds both encodings', async (
   assert.deepEqual(rows.map(({ offset, encoding, text }) => [offset, encoding, text]), [
     [0, 'ASCII', 'sample'], [9, 'UTF-16LE', 'second']
   ]);
+});
+
+test('DEX 041 follows logical headers and allows later shared data', async () => {
+  const dex = Buffer.alloc(256);
+  for (const [offset, length] of [[0, 120], [120, 136]]) {
+    dex.write('dex\n041\0', offset);
+    dex.writeUInt32LE(length, offset + 32);
+    dex.writeUInt32LE(120, offset + 36);
+    dex.writeUInt32LE(0x12345678, offset + 40);
+    dex.writeUInt32LE(1, offset + 56);
+    dex.writeUInt32LE(248, offset + 60);
+    dex.writeUInt32LE(dex.length, offset + 112);
+    dex.writeUInt32LE(offset, offset + 116);
+  }
+  const report = await analyze(new Blob([dex]), 'classes.dex');
+  assert.equal(report.status, 'ok');
+  assert.equal(report.details['Logical DEX files read'], 2);
+  assert.deepEqual(report.rows.map(r => [r.name, r.offset, r.logicalIndex]), [
+    ['header', 0, 0], ['string IDs', 248, 0], ['header', 120, 1], ['string IDs', 248, 1]
+  ]);
+  dex.writeUInt32LE(12, 120 + 60);
+  const partial = await analyze(new Blob([dex]), 'classes.dex');
+  assert.equal(partial.status, 'partial');
+  assert.equal(partial.rows.length, 3);
+});
+
+function makeUnity({ method = 0, atEnd = false, invalidName = false } = {}) {
+  const head = Buffer.alloc(64);
+  const metadata = Buffer.alloc(61);
+  metadata.writeUInt32BE(1, 16);
+  metadata.writeUInt32BE(64, 20);
+  metadata.writeUInt32BE(8, 24);
+  metadata.writeUInt16BE(0x42, 28);
+  metadata.writeUInt32BE(1, 30);
+  metadata.writeBigUInt64BE(3n, 34);
+  metadata.writeBigUInt64BE(20n, 42);
+  metadata.write('CAB-a\0', 54);
+  if (invalidName) metadata.fill(255, 54);
+  const encoded = method ? Buffer.concat([Buffer.from([0xf0, metadata.length - 15]), metadata]) : metadata;
+  const payload = Buffer.alloc(8);
+  head.write('UnityFS\0');
+  head.writeUInt32BE(7, 8);
+  head.write('5.x.x\0' + '2021.3.10f1\0', 12);
+  const end = 12 + 6 + 12;
+  head.writeBigUInt64BE(BigInt(head.length + encoded.length + payload.length), end);
+  head.writeUInt32BE(encoded.length, end + 8);
+  head.writeUInt32BE(metadata.length, end + 12);
+  head.writeUInt32BE(0x40 | method | (atEnd ? 0x80 : 0), end + 16);
+  return new Blob(atEnd ? [head, payload, encoded] : [head, encoded, payload]);
+}
+
+test('UnityFS inventory distinguishes packed and decoded offsets', async () => {
+  for (const [method, atEnd, offset] of [[0, false, 125], [2, true, 64], [3, false, 127]]) {
+    const report = await analyze(makeUnity({ method, atEnd }), 'test.bundle');
+    assert.equal(report.status, 'ok');
+    assert.equal(report.details['Declared files'], 1);
+    assert.equal(report.rows[2].offset, offset);
+    assert.equal(report.rows[2].size, 8);
+    assert.equal(report.rows[3].name, 'CAB-a');
+    assert.equal(report.rows[3].offset, null);
+    assert.equal(report.rows[3].streamOffset, 3);
+  }
+  const report = await analyze(makeUnity({ invalidName: true }), 'test.bundle');
+  assert.equal(report.status, 'partial');
+  assert.equal(report.rows.at(-1).name, 'Block 0');
+});
+
+test('ZIP entry payload is bounded by the start of the entire central directory', async () => {
+  const file = makeZip();
+  const report = await analyze(file, 'sample.apk');
+  const [member] = report.rows;
+  await assert.rejects(openZipMember(file, { ...member, central: 1000, directoryOffset: 40 }), /Data range/);
 });

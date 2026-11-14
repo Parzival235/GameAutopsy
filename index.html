@@ -1,96 +1,131 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
-  <meta name="description" content="Soi cấu trúc file game trực tiếp trên thiết bị.">
+  <meta name="description" content="Inspect game files directly on your device.">
   <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css">
-  <script type="module" src="./app.mjs"></script>
+  <link rel="stylesheet" href="./style.css?v=0.2.0">
+  <script type="module" src="./app.mjs?v=0.2.0"></script>
 </head>
 <body>
 <header class="topbar">
   <a class="brand" href="./">Game<span>Autopsy</span></a>
-  <a class="source" href="https://github.com/Parzival235/GameAutopsy">Mã nguồn ↗</a>
+  <a class="source" href="https://github.com/Parzival235/GameAutopsy">Source code ↗</a>
 </header>
 <main>
   <section class="intro" aria-labelledby="title">
-    <p class="eyebrow"><span></span> Phân tích trên thiết bị</p>
-    <h1 id="title">Soi cấu trúc<br>file game<span>.</span></h1>
-    <p>Mở gói game, dò offset và xem từng vùng dữ liệu. File và báo cáo được xử lý ngay trong trình duyệt.</p>
+    <p class="eyebrow"><span></span> On-device analysis</p>
+    <h1 id="title">Inspect<br>game files<span>.</span></h1>
+    <p>Open game packages, compare versions and inspect bytes by offset. Files and reports stay in your browser.</p>
   </section>
   <section id="drop" class="drop">
     <div class="chip" aria-hidden="true">[ + ]</div>
     <div>
-      <h2>Mở file game</h2>
-      <p>Kéo thả vào đây hoặc chọn một file từ máy.</p>
+      <h2>Open a game file</h2>
+      <p>Drop a file here or choose one from your device.</p>
       <p class="formats">APK · APKS · XAPK · ZIP · DEX · ELF · PE · UNITYFS</p>
     </div>
-    <button id="choose" class="primary">Chọn file</button>
+    <button id="choose" class="primary">Choose file</button>
     <input type="file" id="file" hidden>
+    <input type="file" id="candidate" hidden>
   </section>
   <p id="status" role="status" aria-live="polite"></p>
-  <noscript>GameAutopsy cần JavaScript để đọc file trên thiết bị.</noscript>
-  <section id="workspace" hidden aria-label="Kết quả phân tích">
+  <noscript>GameAutopsy needs JavaScript to read local files.</noscript>
+  <section id="workspace" hidden aria-label="Analysis results">
     <div class="result-head">
       <div class="file-heading">
-        <button id="parent" class="secondary" hidden>↑ Gói cha</button>
+        <button id="parent" class="secondary" hidden>↑ Parent</button>
         <p id="path" class="eyebrow"></p>
         <h2 id="filename"></h2>
       </div>
-      <button id="export" class="secondary">Tải báo cáo JSON ↓</button>
+      <div class="result-actions">
+        <button id="compare" class="secondary" hidden>Compare archive</button>
+        <button id="export" class="secondary">Download JSON ↓</button>
+      </div>
     </div>
     <dl id="stats"></dl>
     <ul id="warnings" hidden></ul>
-    <details id="metadata"><summary>Chi tiết định dạng và nguồn</summary><dl id="details"></dl></details>
-    <div class="tabs" role="tablist" aria-label="Chế độ xem">
-      <button id="tab-structure" aria-selected="true" aria-controls="structure" role="tab">Cấu trúc</button>
+    <details id="metadata"><summary>Format and source details</summary><dl id="details"></dl></details>
+    <div class="tabs" role="tablist" aria-label="Analysis views">
+      <button id="tab-structure" aria-selected="true" aria-controls="structure" role="tab">Structure</button>
       <button id="tab-hex" aria-selected="false" aria-controls="hex" role="tab" tabindex="-1">Hex</button>
-      <button id="tab-strings" aria-selected="false" aria-controls="strings" role="tab" tabindex="-1">Chuỗi</button>
+      <button id="tab-compare" aria-selected="false" aria-controls="comparison" role="tab" tabindex="-1" hidden>Comparison</button>
+      <button id="tab-strings" aria-selected="false" aria-controls="strings" role="tab" tabindex="-1">Strings</button>
     </div>
     <section id="structure" role="tabpanel" aria-labelledby="tab-structure">
       <div class="table-tools">
-        <label>Tìm trong cấu trúc<input id="search" type="search" placeholder="Tên, kiểu hoặc offset" autocomplete="off"></label>
+        <label>Search structure<input id="search" type="search" placeholder="Name, type or offset" autocomplete="off"></label>
         <span id="count"></span>
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th scope="col">Tên / vùng</th><th scope="col">Kiểu</th><th scope="col">Offset</th><th scope="col">Kích thước</th><th scope="col">Chi tiết</th><th scope="col">Thao tác</th></tr></thead>
+          <thead><tr><th scope="col">Name / region</th><th scope="col">Type</th><th scope="col">Offset</th><th scope="col">Size</th><th scope="col">Details</th><th scope="col">Actions</th></tr></thead>
           <tbody id="rows"></tbody>
         </table>
       </div>
-      <nav id="pages" aria-label="Trang kết quả">
-        <button id="prev" class="secondary">← Trước</button>
+      <nav id="pages" aria-label="Results pages">
+        <button id="prev" class="secondary">← Previous</button>
         <span id="page"></span>
-        <button id="next" class="secondary">Sau →</button>
+        <button id="next" class="secondary">Next →</button>
       </nav>
     </section>
     <section id="hex" role="tabpanel" aria-labelledby="tab-hex" hidden>
       <form id="jump" class="table-tools">
-        <label>Offset<input id="offset" value="0x0" placeholder="0x100 hoặc 256" autocomplete="off"></label>
-        <button class="secondary">Đến offset</button>
+        <label>Offset<input id="offset" value="0x0" placeholder="0x100 or 256" autocomplete="off"></label>
+        <button class="secondary">Go to offset</button>
       </form>
+      <div class="hex-controls">
+        <button id="hex-prev" class="secondary" disabled>← 256 bytes</button>
+        <button id="hex-next" class="secondary" disabled>256 bytes →</button>
+        <span id="hex-range"></span>
+      </div>
       <pre id="hexview"></pre>
+      <details id="inspector" open>
+        <summary>Interpret bytes at the current offset</summary>
+        <label>Byte order <select id="endian"><option value="little">Little-endian</option><option value="big">Big-endian</option></select></label>
+        <dl id="values"></dl>
+      </details>
     </section>
     <section id="strings" role="tabpanel" aria-labelledby="tab-strings" hidden>
       <div class="table-tools">
-        <button id="scan" class="secondary">Quét chuỗi trong 4 MiB đầu</button>
+        <button id="scan" class="secondary">Scan first 4 MiB</button>
         <span id="string-info"></span>
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th scope="col">Offset</th><th scope="col">Mã hóa</th><th scope="col">Chuỗi</th></tr></thead>
+          <thead><tr><th scope="col">Offset</th><th scope="col">Encoding</th><th scope="col">Strings</th></tr></thead>
           <tbody id="string-rows"></tbody>
         </table>
       </div>
     </section>
+    <section id="comparison" role="tabpanel" aria-labelledby="tab-compare" hidden>
+      <div class="table-tools">
+        <button id="export-comparison" class="secondary">Download comparison JSON ↓</button>
+        <label>Filter changes <input id="comparison-search" type="search" placeholder="Path or status" autocomplete="off"></label>
+      </div>
+      <p id="comparison-path"></p>
+      <dl id="comparison-stats"></dl>
+      <p id="comparison-note"></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Path</th><th scope="col">Status</th><th scope="col">Current packed</th><th scope="col">Candidate packed</th><th scope="col">Packed delta</th></tr></thead>
+          <tbody id="comparison-rows"></tbody>
+        </table>
+      </div>
+      <nav id="comparison-pages" aria-label="Comparison results pages">
+        <button id="comparison-prev" class="secondary">← Previous</button>
+        <span id="comparison-page"></span>
+        <button id="comparison-next" class="secondary">Next →</button>
+      </nav>
+    </section>
     <div class="hash-line">
-      <button id="hash" class="secondary">Tính SHA-256</button>
+      <button id="hash" class="secondary">Compute SHA-256</button>
       <output id="digest"></output>
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Trình đọc file chỉ đọc · v0.1.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.2.0</span></footer>
 </body>
 </html>
