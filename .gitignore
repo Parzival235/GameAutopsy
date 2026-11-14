@@ -1,0 +1,18 @@
+# Publish only source, documentation and synthetic tests.
+*.apk
+*.apks
+*.xapk
+*.aab
+*.ipa
+*.obb
+*.zip
+*.pck
+*.so
+*.dll
+*.dex
+*.bundle
+*.unity3d
+*.gameautopsy.json
+/private/
+/samples/
+/reports/

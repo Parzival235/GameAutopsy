@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="description" content="Soi cấu trúc file game trực tiếp trên thiết bị.">
+  <title>GameAutopsy</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="./">Game<span>Autopsy</span></a>
+  <a class="source" href="https://github.com/Parzival235/GameAutopsy">Mã nguồn ↗</a>
+</header>
+<main>
+  <section class="intro" aria-labelledby="title">
+    <p class="eyebrow"><span></span> Phân tích trên thiết bị</p>
+    <h1 id="title">Soi cấu trúc<br>file game<span>.</span></h1>
+    <p>Mở gói game, dò offset và xem từng vùng dữ liệu. File và báo cáo được xử lý ngay trong trình duyệt.</p>
+  </section>
+  <section id="drop" class="drop">
+    <div class="chip" aria-hidden="true">[ + ]</div>
+    <div>
+      <h2>Mở file game</h2>
+      <p>Kéo thả vào đây hoặc chọn một file từ máy.</p>
+      <p class="formats">APK · APKS · XAPK · ZIP · DEX · ELF · PE · UNITYFS</p>
+    </div>
+    <button id="choose" class="primary">Chọn file</button>
+    <input type="file" id="file" hidden>
+  </section>
+  <p id="status" role="status" aria-live="polite"></p>
+  <noscript>GameAutopsy cần JavaScript để đọc file trên thiết bị.</noscript>
+  <section id="workspace" hidden aria-label="Kết quả phân tích">
+    <div class="result-head">
+      <div class="file-heading">
+        <button id="parent" class="secondary" hidden>↑ Gói cha</button>
+        <p id="path" class="eyebrow"></p>
+        <h2 id="filename"></h2>
+      </div>
+      <button id="export" class="secondary">Tải báo cáo JSON ↓</button>
+    </div>
+    <dl id="stats"></dl>
+    <ul id="warnings" hidden></ul>
+    <details id="metadata"><summary>Chi tiết định dạng và nguồn</summary><dl id="details"></dl></details>
+    <div class="tabs" role="tablist" aria-label="Chế độ xem">
+      <button id="tab-structure" aria-selected="true" aria-controls="structure" role="tab">Cấu trúc</button>
+      <button id="tab-hex" aria-selected="false" aria-controls="hex" role="tab" tabindex="-1">Hex</button>
+      <button id="tab-strings" aria-selected="false" aria-controls="strings" role="tab" tabindex="-1">Chuỗi</button>
+    </div>
+    <section id="structure" role="tabpanel" aria-labelledby="tab-structure">
+      <div class="table-tools">
+        <label>Tìm trong cấu trúc<input id="search" type="search" placeholder="Tên, kiểu hoặc offset" autocomplete="off"></label>
+        <span id="count"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Tên / vùng</th><th scope="col">Kiểu</th><th scope="col">Offset</th><th scope="col">Kích thước</th><th scope="col">Chi tiết</th><th scope="col">Thao tác</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <nav id="pages" aria-label="Trang kết quả">
+        <button id="prev" class="secondary">← Trước</button>
+        <span id="page"></span>
+        <button id="next" class="secondary">Sau →</button>
+      </nav>
+    </section>
+    <section id="hex" role="tabpanel" aria-labelledby="tab-hex" hidden>
+      <form id="jump" class="table-tools">
+        <label>Offset<input id="offset" value="0x0" placeholder="0x100 hoặc 256" autocomplete="off"></label>
+        <button class="secondary">Đến offset</button>
+      </form>
+      <pre id="hexview"></pre>
+    </section>
+    <section id="strings" role="tabpanel" aria-labelledby="tab-strings" hidden>
+      <div class="table-tools">
+        <button id="scan" class="secondary">Quét chuỗi trong 4 MiB đầu</button>
+        <span id="string-info"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Offset</th><th scope="col">Mã hóa</th><th scope="col">Chuỗi</th></tr></thead>
+          <tbody id="string-rows"></tbody>
+        </table>
+      </div>
+    </section>
+    <div class="hash-line">
+      <button id="hash" class="secondary">Tính SHA-256</button>
+      <output id="digest"></output>
+    </div>
+  </section>
+</main>
+<footer><span>GameAutopsy</span><span>Trình đọc file chỉ đọc · v0.1.0</span></footer>
+</body>
+</html>
