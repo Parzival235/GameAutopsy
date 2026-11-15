@@ -6,8 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Inspect game files directly on your device.">
   <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css?v=0.4.0">
-  <script type="module" src="./app.mjs?v=0.4.0"></script>
+  <link rel="stylesheet" href="./style.css?v=0.5.0">
+  <script type="module" src="./app.mjs?v=0.5.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -30,6 +30,7 @@
     <button id="choose" class="primary">Choose file</button>
     <input type="file" id="file" hidden>
     <input type="file" id="candidate" hidden>
+    <input type="file" id="byte-candidate" hidden>
   </section>
   <p id="status" role="status" aria-live="polite"></p>
   <noscript>GameAutopsy needs JavaScript to read local files.</noscript>
@@ -52,6 +53,8 @@
     <details id="metadata"><summary>Format and source details</summary><dl id="details"></dl></details>
     <div class="tabs" role="tablist" aria-label="Analysis views">
       <button id="tab-structure" aria-selected="true" aria-controls="structure" role="tab">Structure</button>
+      <button id="tab-inventory" aria-selected="false" aria-controls="inventory" role="tab" tabindex="-1" hidden>Inventory</button>
+      <button id="tab-binary" aria-selected="false" aria-controls="binary" role="tab" tabindex="-1">Byte diff</button>
       <button id="tab-hex" aria-selected="false" aria-controls="hex" role="tab" tabindex="-1">Hex</button>
       <button id="tab-compare" aria-selected="false" aria-controls="comparison" role="tab" tabindex="-1" hidden>Comparison</button>
       <button id="tab-checks" aria-selected="false" aria-controls="checks" role="tab" tabindex="-1" hidden>ZIP checks</button>
@@ -74,6 +77,60 @@
         <span id="page"></span>
         <button id="next" class="secondary">Next →</button>
       </nav>
+    </section>
+    <section id="inventory" role="tabpanel" aria-labelledby="tab-inventory" hidden>
+      <div class="table-tools">
+        <button id="inventory-run" class="secondary">Index root archive</button>
+        <button id="inventory-export" class="secondary" hidden>Download inventory JSON ↓</button>
+        <label>Search inventory<input id="inventory-query" type="search" placeholder="Path, kind or detected format" autocomplete="off"></label>
+        <label>Category<select id="inventory-category">
+          <option value="">All entries</option><option>Archive candidate</option><option>Code / binary</option>
+          <option>Text / data</option><option>Media</option><option>Other</option>
+        </select></label>
+      </div>
+      <p id="inventory-summary" class="help" aria-live="polite">Index supported archive members from the root file.</p>
+      <details id="inventory-coverage" hidden><summary>Coverage notes</summary><ul id="inventory-notices"></ul></details>
+      <div id="inventory-output" class="table-wrap" hidden>
+        <table>
+          <thead><tr><th scope="col">Entry</th><th scope="col">Container path</th><th scope="col">Format or category</th><th scope="col">Size</th><th scope="col">Action</th></tr></thead>
+          <tbody id="inventory-rows"></tbody>
+        </table>
+      </div>
+      <nav id="inventory-pages" class="pager" aria-label="Inventory pages" hidden>
+        <button id="inventory-prev" class="secondary">← Previous</button><span id="inventory-page"></span>
+        <button id="inventory-next" class="secondary">Next →</button>
+      </nav>
+    </section>
+    <section id="binary" role="tabpanel" aria-labelledby="tab-binary" hidden>
+      <div class="table-tools">
+        <button id="byte-choose" class="secondary">Choose comparison file</button>
+        <button id="byte-export" class="secondary" hidden>Download byte diff JSON ↓</button>
+      </div>
+      <div id="byte-result" hidden>
+        <p id="byte-files" class="help"></p>
+        <p id="byte-coverage" class="help" aria-live="polite"></p>
+        <dl id="byte-stats" class="detail-grid"></dl>
+        <form id="byte-form" class="table-tools">
+          <label>Offset<input id="byte-offset" value="0x0" autocomplete="off" required></label>
+          <button class="secondary" name="action" value="preview">Preview offset</button>
+          <button class="secondary" name="action" value="scan">Compare from offset</button>
+          <button id="byte-more" type="button" class="secondary" hidden>Continue comparison</button>
+        </form>
+        <div id="byte-panels">
+          <div><h3>Current file</h3><pre id="byte-left"></pre></div>
+          <div><h3>Comparison file</h3><pre id="byte-right"></pre></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Offset</th><th scope="col">Length</th><th scope="col">Difference</th></tr></thead>
+            <tbody id="byte-rows"></tbody>
+          </table>
+        </div>
+        <nav id="byte-pages" class="pager" aria-label="Byte difference pages" hidden>
+          <button id="byte-prev" class="secondary">← Previous</button><span id="byte-page"></span>
+          <button id="byte-next" class="secondary">Next →</button>
+        </nav>
+      </div>
     </section>
     <section id="hex" role="tabpanel" aria-labelledby="tab-hex" hidden>
       <form id="jump" class="table-tools">
@@ -164,6 +221,6 @@
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.4.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.5.0</span></footer>
 </body>
 </html>

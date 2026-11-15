@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { analyze } from '../formats.mjs';
+import { buildInventory } from '../inventory.mjs';
+import { openMember } from '../archive-members.mjs';
 import { compareArchives } from '../compare.mjs';
 import { compareNestedArchives } from '../nested-compare.mjs';
 
@@ -137,4 +139,23 @@ test('nested archive comparison separates scopes and reports bad or unpaired inp
   assert.equal(result.skipped, 2);
   assert.equal(result.notices.find(item => item.path[0] === 'extra.apk').reason, 'Archive path is present on only one side.');
   assert.match(result.notices.find(item => item.path[0] === 'broken.apk').reason, /complete ZIP directories/);
+});
+
+test('inventory indexes mixed containers and preserves exact open routes', async () => {
+  const pck = pack(3);
+  const root = await inspectZip(zip([
+    ['base.apk', zip([['assets/game.pck', Buffer.from(await pck.blob.arrayBuffer())], ['assets/broken.bundle', 'bogus']])],
+    ['config.apk', zip([['android.json', 'other']])]
+  ]), 'root.apks');
+  const result = await buildInventory(root);
+  assert.equal(result.containers, 4);
+  assert.equal(result.skipped, 1);
+  assert.equal(result.notices[0].path.at(-1), 'assets/broken.bundle');
+  const hit = result.rows.find(row => row.name === pck.name);
+  assert.equal(hit.category, 'Text / data');
+  assert.deepEqual(hit.path, ['root.apks', 'base.apk', 'assets/game.pck']);
+  let location = root;
+  for (const index of hit.route) location = await openMember(location, location.report.rows[index]);
+  assert.equal(await location.blob.text(), bytes.toString());
+  assert.equal(location.report.source.dataOffset, pck.offset);
 });

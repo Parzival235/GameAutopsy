@@ -1,17 +1,25 @@
-import { analyze, MiB, openUnityMember, openZipMember, preview, sampleStrings } from './formats.mjs?v=0.4.0';
-import { compareArchives } from './compare.mjs?v=0.4.0';
-import { compareNestedArchives } from './nested-compare.mjs';
-import { checkZip, verifyZipPayloads } from './zip-checks.mjs';
+import { preview, sampleStrings } from './formats.mjs?v=0.5.0';
+import { compareArchives } from './compare.mjs?v=0.5.0';
+import { compareNestedArchives } from './nested-compare.mjs?v=0.5.0';
+import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.5.0';
 import { searchBytes } from './byte-search.mjs';
 
-const stack = [];
-const maxDepth = 6;
-const maxExpanded = 256 * MiB;
+import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs';
+import { buildInventory } from './inventory.mjs';
+import { compareBytes, previewDiff } from './binary-diff.mjs';
 
-async function inspect(blob, name, source = null) {
-  const report = await analyze(blob, name);
-  if (source) report.source = source;
-  return { blob, report };
+const stack = [];
+let inventory;
+let bytePair;
+
+async function appendMember(nodes, index) {
+  if (nodes.length >= maxDepth + 1) throw new Error('The six-level nesting limit has been reached.');
+  const parent = nodes.at(-1);
+  const entry = parent.report.rows[index];
+  if (!entry?.open) throw new Error('That entry cannot be opened.');
+  const retained = nodes.slice(1).reduce((sum, node) => sum + node.blob.size, 0);
+  if (retained + entry.size > maxExpanded) throw new Error('Open entries would exceed the combined 256 MiB limit.');
+  nodes.push(await openMember(parent, entry));
 }
 
 function current() {
@@ -22,40 +30,51 @@ function current() {
 function listing() {
   return {
     path: stack.map(node => node.report.name),
-    report: current().report
+    report: current().report, inventoryAvailable: archiveFormat(stack[0].report.format)
   };
 }
 
-async function run({ action, file, index, offset, query, mode, nested }) {
+async function run({ action, file, index, offset, query, mode, nested }, progress) {
   switch (action) {
     case 'open':
       stack.splice(0, stack.length, await inspect(file, file.name));
+      inventory = undefined;
+      bytePair = undefined;
       return listing();
-    case 'member': {
-      const { blob, report } = current();
-      const entry = report.rows[index];
-      if (!entry?.open) throw new Error('That entry cannot be opened.');
-      if (stack.length >= maxDepth + 1) throw new Error('The six-level nesting limit has been reached.');
-      const retained = stack.slice(1).reduce((sum, node) => sum + node.blob.size, 0);
-      if (retained + entry.size > maxExpanded) throw new Error('Open entries would exceed the combined 256 MiB limit.');
-      if (report.format === 'UnityFS') {
-        const member = await openUnityMember(blob, report, entry);
-        stack.push(await inspect(member, entry.name, { streamOffset: entry.streamOffset }));
-      } else if (report.format === 'Godot PCK') {
-        if (entry.size > 128 * MiB) throw new Error('The PCK file exceeds the 128 MiB open limit.');
-        const member = blob.slice(entry.offset, entry.offset + entry.size);
-        stack.push(await inspect(member, entry.name, { dataOffset: entry.offset, declaredMd5: entry.declaredMd5 }));
-      } else {
-        const opened = await openZipMember(blob, entry);
-        stack.push(await inspect(opened.blob, entry.name, {
-          localHeaderOffset: entry.offset, dataOffset: opened.dataOffset, crc32: entry.crc32
-        }));
+    case 'member':
+      await appendMember(stack, index);
+      bytePair = undefined;
+      return listing();
+    case 'parent':
+      if (stack.length > 1) {
+        stack.pop();
+        bytePair = undefined;
       }
       return listing();
-    }
-    case 'parent':
-      if (stack.length > 1) stack.pop();
+    case 'inventory':
+      if (!stack.length) throw new Error('Choose a file first.');
+      inventory = await buildInventory(stack[0], progress);
+      return inventory;
+    case 'inventory-open': {
+      const record = inventory?.rows[index];
+      if (!record?.open) throw new Error('That inventory entry cannot be opened.');
+      const next = [stack[0]];
+      for (const entryIndex of record.route) await appendMember(next, entryIndex);
+      stack.splice(0, stack.length, ...next);
+      bytePair = undefined;
       return listing();
+    }
+    case 'diff-bytes': {
+      const left = current();
+      const candidate = file ?? bytePair?.after;
+      if (!candidate) throw new Error('Choose a candidate file first.');
+      const result = await compareBytes(left.blob, candidate, offset, progress);
+      bytePair = { before: left.blob, after: candidate };
+      return { ...result, schema: 'gameautopsy/byte-diff/1', before: left.report.name, after: candidate.name, path: listing().path };
+    }
+    case 'diff-preview':
+      if (!bytePair) throw new Error('Compare two files first.');
+      return previewDiff(bytePair.before, bytePair.after, offset);
     case 'compare': {
       const before = current();
       const after = await inspect(file, file.name);
@@ -95,7 +114,7 @@ async function run({ action, file, index, offset, query, mode, nested }) {
 self.addEventListener('message', async event => {
   const { id } = event.data;
   try {
-    self.postMessage({ id, data: await run(event.data) });
+    self.postMessage({ id, data: await run(event.data, progress => self.postMessage({ id, progress })) });
   } catch (error) {
     self.postMessage({ id, error: error.message });
   }

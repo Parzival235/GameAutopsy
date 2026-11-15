@@ -8,7 +8,7 @@ GameAutopsy is a read-only game-file inspector that runs in your browser. Open t
 2. In **Structure**, search for a path, type, or offset. Use **Open** on a ZIP entry to inspect its contents, or **Hex** to highlight its range in the current file. For ZIP entries, this shortcut highlights the fixed part of the local header.
 3. In **Hex**, use a decimal or hexadecimal offset, step through 256-byte pages, or interpret the bytes at the current offset as signed integers, unsigned integers, or floats in either byte order.
 4. In **Find bytes**, enter UTF-8 text or a hex sequence such as `55 6E ?? 74`. Click a result to highlight the match in Hex. **Continue search** resumes at the next unchecked offset.
-5. Use **Strings**, **Compute SHA-256**, or **Download JSON** on the current file. **Save open entry** downloads the bytes of an opened ZIP or UnityFS member to your device. Reports include any ZIP checks, string sample and SHA-256 you ran for the current file.
+5. Use **Strings**, **Compute SHA-256**, or **Download JSON** on the current file. **Save open entry** downloads the bytes of an opened ZIP, UnityFS or Godot PCK member to your device. Reports include any ZIP checks, string sample and SHA-256 you ran for the current file.
 
 | Format | What GameAutopsy reads |
 | --- | --- |
@@ -23,6 +23,18 @@ GameAutopsy is a read-only game-file inspector that runs in your browser. Open t
 | Any file | Hex, typed values, resumable UTF-8 and wildcard byte search, entropy, string samples and optional SHA-256. |
 
 Offsets use bytes from the start of the current file unless labeled otherwise. ZIP structure offsets point to local headers. After opening an entry, **Format and source details** gives the local header and payload offsets in the parent archive. UnityFS file entries have a separate `streamOffset` into the decoded stream, while UnityFS block offsets point into the original bundle.
+
+## Search an entire package
+
+Open a ZIP-based package, UnityFS bundle, or standalone PCK and select **Inventory → Index root archive**. Filter by category or search for words from the filename, parent container path, row kind, or detected archive format. **Open** reconstructs the entry's location in the root package. The inventory stays available while you navigate its entries.
+
+The index follows supported archive filename extensions, then checks the contents before traversing them. Category labels are filename hints. Extensionless containers require manual inspection. Indexing is bounded to four nested levels, 48 archive candidates including the root, 24,000 entries, 4 million UTF-16 code units of filename text, and 256 MiB of declared input. Coverage notes and JSON export identify skipped candidates and show how far the scan reached.
+
+## Compare file bytes
+
+Open any file or archive member, select **Byte diff**, and pick a comparison file from your device. The tool compares bytes at the same offsets, groups contiguous differences, and separately counts each file's extra tail bytes. Select a range to see both sides in hex with changed and missing bytes highlighted.
+
+Each pass covers up to 128 MiB of offsets. **Continue comparison** resumes after the last pass, and **Compare from offset** starts at a decimal or hexadecimal address. The JSON export covers the current pass, keeps the first 2,048 ranges, and counts additional ranges. Insertions and deletions inside a file can shift later bytes and produce a long run of offset mismatches.
 
 ## Compare two releases
 

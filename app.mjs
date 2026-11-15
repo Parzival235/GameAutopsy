@@ -3,12 +3,16 @@ import { interpretBytes } from './hex.mjs';
 const byId = id => document.getElementById(id);
 const pageSize = 80;
 const digits = new Intl.NumberFormat('en-US');
-const tabs = { structure: 'structure', hex: 'hex', compare: 'comparison', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.4.0', { type: 'module' });
+const tabs = { structure: 'structure', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', checks: 'checks', find: 'find', strings: 'strings' };
+const worker = new Worker('./worker.mjs?v=0.5.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
 let comparisonPage = 0;
+let inventory;
+let inventoryPage = 0;
+let binaryDiff;
+let binaryPage = 0;
 let hexPage;
 let highlighted;
 let checkPage = 0;
@@ -23,9 +27,13 @@ const hex = (number, width = 0) => number.toString(16).toUpperCase().padStart(wi
 const address = number => number == null ? '—' : '0x' + hex(number);
 const bytes = number => number == null ? '—' : digits.format(number) + ' B';
 
-worker.addEventListener('message', ({ data: { id, data, error } }) => {
+worker.addEventListener('message', ({ data: { id, data, error, progress } }) => {
   const callback = pending.get(id);
   if (!callback) return;
+  if (progress) {
+    callback.onProgress?.(progress);
+    return;
+  }
   pending.delete(id);
   if (error) callback.reject(new Error(error));
   else callback.resolve(data);
@@ -36,11 +44,11 @@ worker.addEventListener('error', () => {
   pending.clear();
 });
 
-function call(action, args) {
+function call(action, args, onProgress) {
   if (workerError) return Promise.reject(workerError);
   const id = ++requestId;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    pending.set(id, { resolve, reject, onProgress });
     try {
       worker.postMessage({ id, action, ...args });
     } catch (error) {
@@ -177,6 +185,10 @@ function show(data) {
   byId('filename').textContent = report.name;
   byId('parent').hidden = path.length === 1;
   byId('compare').hidden = report.format !== 'ZIP';
+  byId('tab-inventory').hidden = !data.inventoryAvailable;
+  binaryDiff = undefined;
+  byId('byte-result').hidden = true;
+  byId('byte-export').hidden = true;
   byId('nested-option').hidden = report.format !== 'ZIP';
   byId('tab-checks').hidden = report.format !== 'ZIP';
   byId('download-member').hidden = path.length === 1;
@@ -397,7 +409,10 @@ function findBytes(offset, query, mode) {
 
 function open(file) {
   if (file) perform('Inspecting file…', async () => {
-    show(await call('open', { file }));
+    const result = await call('open', { file });
+    inventory = undefined;
+    renderInventory();
+    show(result);
     byId('filename').scrollIntoView({ block: 'center' });
   });
 }
@@ -561,3 +576,152 @@ byId('export').addEventListener('click', () => {
 byId('export-comparison').addEventListener('click', () => {
   downloadJson(comparison, comparison.candidate, '.gameautopsy-comparison.json');
 });
+
+function outputPage(name, index, length) {
+  const count = Math.max(1, Math.ceil(length / pageSize));
+  const page = Math.max(0, Math.min(index, count - 1));
+  byId(name + '-pages').hidden = count <= 1;
+  byId(name + '-page').textContent = (page + 1) + ' / ' + count;
+  byId(name + '-prev').disabled = page === 0;
+  byId(name + '-next').disabled = page >= count - 1;
+  return page;
+}
+
+function renderInventory() {
+  byId('inventory-output').hidden = !inventory;
+  byId('inventory-export').hidden = !inventory;
+  byId('inventory-coverage').hidden = !inventory?.notices.length;
+  if (!inventory) {
+    byId('inventory-summary').textContent = 'Index supported archive members from the root file.';
+    byId('inventory-query').value = '';
+    byId('inventory-category').value = '';
+    byId('inventory-pages').hidden = true;
+    byId('inventory-rows').replaceChildren();
+    inventoryPage = 0;
+    return;
+  }
+  const terms = byId('inventory-query').value.trim().toLowerCase().split(/\s+/);
+  const category = byId('inventory-category').value;
+  const matches = inventory.rows.filter(row => {
+    if (category && row.category !== category) return false;
+    const text = [...row.path, row.name, row.kind, row.category, row.detectedFormat].join(' ').toLowerCase();
+    return terms.every(term => text.includes(term));
+  });
+  inventoryPage = outputPage('inventory', inventoryPage, matches.length);
+  byId('inventory-summary').textContent = digits.format(matches.length) + ' of ' + digits.format(inventory.rows.length) +
+    ' entries · ' + inventory.containers + ' containers · ' + inventory.skipped + ' coverage notes' +
+    (inventory.truncated ? ' · Inventory limit reached' : '');
+  byId('inventory-rows').replaceChildren(...matches.slice(inventoryPage * pageSize, (inventoryPage + 1) * pageSize).map(row => {
+    const tr = node('tr');
+    for (const cell of [row.name, row.path.join(' › '), row.detectedFormat ?? row.category, bytes(row.size)]) {
+      tr.append(node('td', cell));
+    }
+    const actions = node('td');
+    if (row.open) actions.append(actionButton('Open', () => perform('Opening inventory entry…', async () => {
+      show(await call('inventory-open', { index: row.id }));
+    })));
+    else actions.textContent = 'Metadata only';
+    tr.append(actions);
+    return tr;
+  }));
+}
+
+byId('inventory-run').addEventListener('click', () => perform('Indexing the root archive…', async () => {
+  inventory = await call('inventory', {}, progress =>
+    status('Indexing… ' + digits.format(progress.entries) + ' entries in ' + progress.containers + ' containers')
+  );
+  inventoryPage = 0;
+  const notices = inventory.notices.map(item => node('li', item.path.join(' › ') + ' — ' + item.reason));
+  if (inventory.skipped > notices.length) notices.push(node('li', 'Additional notices are counted in the total.'));
+  byId('inventory-notices').replaceChildren(...notices);
+  renderInventory();
+}));
+for (const [id, event] of [['inventory-query', 'input'], ['inventory-category', 'change']]) {
+  byId(id).addEventListener(event, () => { inventoryPage = 0; renderInventory(); });
+}
+byId('inventory-prev').addEventListener('click', () => { inventoryPage--; renderInventory(); });
+byId('inventory-next').addEventListener('click', () => { inventoryPage++; renderInventory(); });
+byId('inventory-export').addEventListener('click', () =>
+  downloadJson(inventory, inventory.root, '.gameautopsy-inventory.json')
+);
+
+const diffKinds = { changed: 'Changed', beforeOnly: 'Current file only', afterOnly: 'Comparison file only' };
+async function showBytePreview(offset) {
+  const result = await call('diff-preview', { offset });
+  const count = Math.max(result.before.length, result.after.length);
+  for (const [id, values, other] of [
+    ['byte-left', result.before, result.after], ['byte-right', result.after, result.before]
+  ]) {
+    const out = document.createDocumentFragment();
+    for (let i = 0; i < count; i += 16) {
+      out.append(hex(offset + i, 8) + '  ');
+      for (let j = i; j < Math.min(i + 16, count); j++) {
+        const text = values[j] === undefined ? '··' : hex(values[j], 2);
+        out.append(values[j] === other[j] ? text : node('mark', text), ' ');
+      }
+      if (i + 16 < count) out.append('\n');
+    }
+    byId(id).replaceChildren(count ? out : 'Empty files.');
+  }
+  byId('byte-offset').value = address(offset);
+}
+
+function renderBinaryRanges() {
+  binaryPage = outputPage('byte', binaryPage, binaryDiff.ranges.length);
+  byId('byte-rows').replaceChildren(...binaryDiff.ranges.slice(binaryPage * pageSize, (binaryPage + 1) * pageSize).map(range => {
+    const tr = node('tr');
+    const at = node('td');
+    at.append(actionButton(address(range.offset), () => perform('Reading both files…', () => showBytePreview(range.offset))));
+    tr.append(at, node('td', bytes(range.length)), node('td', diffKinds[range.kind]));
+    return tr;
+  }));
+}
+
+function scanBinary(offset, file) {
+  return perform('Comparing bytes…', async () => {
+    const result = await call('diff-bytes', { offset, file }, ({ scanned, total }) =>
+      status('Comparing bytes… ' + bytes(scanned) + ' / ' + bytes(total))
+    );
+    binaryDiff = result;
+    binaryPage = 0;
+    byId('byte-files').textContent = result.before + ' (' + bytes(result.beforeSize) + ') ↔ ' +
+      result.after + ' (' + bytes(result.afterSize) + ')';
+    const coverage = '[' + address(result.start) + ', ' + address(result.end) + ') at the same offsets';
+    const equality = !result.totalRanges ?
+      (result.start === 0 && result.next === null ? 'Files identical byte for byte. ' : 'Scanned bytes match. ') : '';
+    byId('byte-coverage').textContent = equality + coverage +
+      (result.omittedRanges ? ' · ' + digits.format(result.omittedRanges) + ' additional ranges counted' : '');
+    definitions(byId('byte-stats'), {
+      Changed: bytes(result.changed), 'Current only': bytes(result.beforeOnly), 'Comparison only': bytes(result.afterOnly),
+      Ranges: digits.format(result.totalRanges)
+    });
+    byId('byte-more').hidden = result.next === null;
+    renderBinaryRanges();
+    await showBytePreview(result.ranges[0]?.offset ?? (result.end > result.start ? result.start : Math.max(0, result.start - 1)));
+    byId('byte-result').hidden = false;
+    byId('byte-export').hidden = false;
+  });
+}
+const byteInput = byId('byte-candidate');
+byId('byte-choose').addEventListener('click', () => { if (!busy) byteInput.click(); });
+byteInput.addEventListener('change', () => {
+  const file = byteInput.files[0];
+  byteInput.value = '';
+  if (file) scanBinary(0, file);
+});
+byId('byte-form').addEventListener('submit', event => {
+  event.preventDefault();
+  try {
+    const offset = parseOffset(byId('byte-offset').value);
+    if (event.submitter?.value === 'scan') scanBinary(offset);
+    else perform('Reading both files…', () => showBytePreview(offset));
+  } catch (error) {
+    status(error.message, true);
+  }
+});
+byId('byte-more').addEventListener('click', () => scanBinary(binaryDiff.next));
+byId('byte-prev').addEventListener('click', () => { binaryPage--; renderBinaryRanges(); });
+byId('byte-next').addEventListener('click', () => { binaryPage++; renderBinaryRanges(); });
+byId('byte-export').addEventListener('click', () =>
+  downloadJson(binaryDiff, binaryDiff.after, '.gameautopsy-byte-diff.json')
+);
