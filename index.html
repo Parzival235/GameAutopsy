@@ -6,8 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Inspect game files directly on your device.">
   <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css?v=0.8.0">
-  <script type="module" src="./app.mjs?v=0.8.0"></script>
+  <link rel="stylesheet" href="./style.css?v=0.9.0">
+  <script type="module" src="./app.mjs?v=0.9.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -52,6 +52,7 @@
       <div class="result-actions">
         <button id="compare" class="secondary" hidden>Compare archive</button>
         <label id="nested-option" class="option" hidden><input id="nested-compare" type="checkbox" checked> Inspect nested archives</label>
+        <label id="verify-content-option" class="option" hidden><input id="verify-content" type="checkbox"> Verify entry bytes</label>
         <button id="download-member" class="secondary" hidden>Save open entry ↓</button>
         <button id="export" class="secondary">Current file JSON ↓</button>
         <button id="export-full" class="primary">Export full JSON ↓</button>
@@ -163,10 +164,17 @@
       </details>
     </section>
     <section id="strings" role="tabpanel" aria-labelledby="tab-strings" hidden>
-      <div class="table-tools">
-        <button id="scan" class="secondary">Scan first 4 MiB</button>
-        <span id="string-info"></span>
-      </div>
+      <form id="string-form" class="table-tools">
+        <label>Encoding <select id="string-encoding">
+          <option value="utf8">UTF-8</option><option value="utf16le">UTF-16LE</option>
+          <option value="utf16be">UTF-16BE</option><option value="ascii">ASCII</option>
+        </select></label>
+        <label>Start offset <input id="string-offset" value="0x0" autocomplete="off" required></label>
+        <label>Minimum characters <input id="string-min" type="number" value="6" min="2" max="128" required></label>
+        <button class="secondary" type="submit">Scan strings</button>
+        <button id="string-next" class="secondary" type="button" hidden>Continue scan</button>
+      </form>
+      <p id="string-info" class="help" aria-live="polite"></p>
       <div class="table-wrap">
         <table>
           <thead><tr><th scope="col">Offset</th><th scope="col">Encoding</th><th scope="col">Strings</th></tr></thead>
@@ -178,7 +186,8 @@
       <div class="table-tools">
         <button id="export-comparison" class="secondary">Download comparison JSON ↓</button>
         <label id="comparison-scope-label" hidden>Archive scope <select id="comparison-scope"></select></label>
-        <label>Filter changes <input id="comparison-search" type="search" placeholder="Path or status" autocomplete="off"></label>
+        <label>Filter results <input id="comparison-search" type="search" placeholder="Path or status" autocomplete="off"></label>
+        <label id="comparison-match-option" class="option" hidden><input id="comparison-show-matches" type="checkbox"> Show verified matches</label>
       </div>
       <p id="comparison-path"></p>
       <dl id="comparison-stats"></dl>
@@ -189,7 +198,7 @@
       </details>
       <div class="table-wrap">
         <table>
-          <thead><tr><th scope="col">Path</th><th scope="col">Status</th><th scope="col">Current packed</th><th scope="col">Candidate packed</th><th scope="col">Packed delta</th></tr></thead>
+          <thead><tr><th scope="col">Path</th><th scope="col">Status</th><th scope="col">Payload evidence</th><th scope="col">Current packed</th><th scope="col">Candidate packed</th><th scope="col">Packed delta</th></tr></thead>
           <tbody id="comparison-rows"></tbody>
         </table>
       </div>
@@ -272,6 +281,6 @@
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.8.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.9.0</span></footer>
 </body>
 </html>

@@ -1,15 +1,17 @@
-import { preview, sampleStrings } from './formats.mjs?v=0.8.0';
-import { compareArchives } from './compare.mjs?v=0.8.0';
-import { compareNestedArchives } from './nested-compare.mjs?v=0.8.0';
-import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.8.0';
-import { searchBytes } from './byte-search.mjs?v=0.8.0';
-import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.8.0';
-import { buildInventory } from './inventory.mjs?v=0.8.0';
-import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.8.0';
+import { preview } from './formats.mjs?v=0.9.0';
+import { compareArchives } from './compare.mjs?v=0.9.0';
+import { compareNestedArchives } from './nested-compare.mjs?v=0.9.0';
+import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.9.0';
+import { searchBytes } from './byte-search.mjs?v=0.9.0';
+import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.9.0';
+import { buildInventory } from './inventory.mjs?v=0.9.0';
+import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.9.0';
 import { interpretBytes } from './hex.mjs';
 import { canInspectApkSet, inspectApkSet } from './apk-set.mjs';
 import { createReportSession } from './report-session.mjs';
-import { hashSha256 } from './sha256.mjs?v=0.8.0';
+import { createPayloadComparison } from './zip-content-diff.mjs?v=0.9.0';
+import { sampleStrings, scanStrings } from './string-scan.mjs?v=0.9.0';
+import { hashSha256 } from './sha256.mjs?v=0.9.0';
 
 const stack = [];
 let inventory;
@@ -113,7 +115,7 @@ async function fullReport(progress) {
   };
 }
 
-async function run({ action, file, index, offset, query, mode, nested, abi }, progress, signal) {
+async function run({ action, file, index, offset, query, mode, nested, abi, verifyPayloads, stringOptions }, progress, signal) {
   switch (action) {
     case 'open': {
       const node = await inspect(file, file.name, undefined, progress);
@@ -193,9 +195,11 @@ async function run({ action, file, index, offset, query, mode, nested, abi }, pr
     case 'compare': {
       const before = current();
       const after = await inspect(file, file.name, undefined, progress);
-      const result = compareArchives(before.report, after.report);
-      if (nested) result.nested = await compareNestedArchives(before, after, result, progress);
-      return session.record(before, 'archiveComparison', result, { nested });
+      let result = compareArchives(before.report, after.report);
+      const verify = verifyPayloads ? createPayloadComparison() : null;
+      if (verify) result = compareArchives(before.report, after.report, await verify(before, after, progress));
+      if (nested) result.nested = await compareNestedArchives(before, after, result, progress, verify);
+      return session.record(before, 'archiveComparison', result, { nested, verifyPayloads });
     }
     case 'checks': {
       const node = current();
@@ -220,8 +224,8 @@ async function run({ action, file, index, offset, query, mode, nested, abi }, pr
     }
     case 'strings': {
       const node = current();
-      node.report.strings = await sampleStrings(node.blob, progress);
-      return session.record(node, 'strings', node.report.strings);
+      node.report.strings = await scanStrings(node.blob, stringOptions, progress);
+      return session.record(node, 'strings', node.report.strings, stringOptions);
     }
     case 'sha256': {
       const node = current();

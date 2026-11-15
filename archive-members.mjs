@@ -1,4 +1,4 @@
-import { analyze, MiB, openUnityMember, openZipMember } from './formats.mjs?v=0.8.0';
+import { analyze, MiB, openUnityMember, openZipMember } from './formats.mjs?v=0.9.0';
 
 export const maxDepth = 6;
 export const maxExpanded = 256 * MiB;

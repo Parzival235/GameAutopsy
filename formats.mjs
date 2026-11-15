@@ -1,10 +1,12 @@
 import { inspectPck } from './pck.mjs';
-import { inspectAxml } from './axml.mjs?v=0.8.0';
-import { inspectSerializedFile, looksLikeSerializedFile } from './unity-serialized.mjs?v=0.8.0';
+import { inspectAxml } from './axml.mjs?v=0.9.0';
+import { inspectSerializedFile, looksLikeSerializedFile } from './unity-serialized.mjs?v=0.9.0';
 
-import { decodeUnityLzma, maxLzmaBlock } from './unity-lzma.mjs?v=0.8.0';
+import { decodeUnityLzma, maxLzmaBlock } from './unity-lzma.mjs?v=0.9.0';
 
-export const version = '0.8.0';
+export { sampleStrings } from './string-scan.mjs?v=0.9.0';
+
+export const version = '0.9.0';
 export const MiB = 1024 * 1024;
 const maxRows = 20000;
 const maxDirectory = 24 * MiB;
@@ -762,42 +764,4 @@ export async function preview(blob, offset) {
   if (!blob.size && offset === 0) return { offset, bytes: [] };
   requireRange(blob.size, offset, 1);
   return { offset, bytes: [...await bytesAt(blob, offset, Math.min(256, blob.size - offset))] };
-}
-
-export async function sampleStrings(blob, progress = () => {}) {
-  const limit = 4 * MiB;
-  const maxResults = 500;
-  progress({ stage: 'Reading string sample' });
-  const data = await bytesAt(blob, 0, Math.min(blob.size, limit));
-  const candidates = [];
-  const printable = byte => byte >= 32 && byte <= 126;
-  function scan(start, step, encoding, valid) {
-    let count = 0;
-    for (let i = start; i < data.length;) {
-      if (!valid(i)) {
-        i += step;
-        continue;
-      }
-      const first = i;
-      let text = '';
-      while (i < data.length && valid(i)) {
-        if (text.length < 240) text += String.fromCharCode(data[i]);
-        i += step;
-      }
-      const length = (i - first) / step;
-      if (length >= 6) {
-        candidates.push({ offset: first, text, length, encoding });
-        if (++count > maxResults) break;
-      }
-    }
-  }
-  progress({ stage: 'Scanning strings', done: 0, total: 3, unit: 'passes' });
-  scan(0, 1, 'ASCII', i => printable(data[i]));
-  progress({ stage: 'Scanning strings', done: 1, total: 3, unit: 'passes' });
-  for (const start of [0, 1]) {
-    scan(start, 2, 'UTF-16LE', i => printable(data[i]) && data[i + 1] === 0);
-    progress({ stage: 'Scanning strings', done: start + 2, total: 3, unit: 'passes' });
-  }
-  candidates.sort((a, b) => a.offset - b.offset || a.encoding.localeCompare(b.encoding));
-  return { scannedBytes: data.length, truncated: candidates.length > maxResults, rows: candidates.slice(0, maxResults) };
 }

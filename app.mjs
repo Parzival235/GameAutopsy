@@ -8,7 +8,7 @@ const setOrientation = () => document.querySelector('.tabs').setAttribute('aria-
 mobile.addEventListener('change', setOrientation);
 setOrientation();
 const tabs = { structure: 'structure', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', 'apk-set': 'apk-set', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.8.0', { type: 'module' });
+const worker = new Worker('./worker.mjs?v=0.9.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
@@ -256,6 +256,7 @@ function show(data) {
   byId('byte-result').hidden = true;
   byId('byte-export').hidden = true;
   byId('nested-option').hidden = report.format !== 'ZIP';
+  byId('verify-content-option').hidden = report.format !== 'ZIP';
   byId('tab-apk-set').hidden = !data.apkSetAvailable;
   byId('tab-checks').hidden = report.format !== 'ZIP';
   byId('download-member').hidden = path.length === 1;
@@ -288,6 +289,9 @@ function show(data) {
   byId('search').value = '';
   byId('offset').value = '0x0';
   byId('hexview').textContent = '';
+  byId('string-encoding').value = report.strings?.mode && report.strings.mode !== 'sample' ? report.strings.mode : 'utf8';
+  byId('string-min').value = report.strings?.minLength ?? 6;
+  byId('string-offset').value = address(report.strings?.from ?? 0);
   renderStrings(report.strings);
   byId('digest').textContent = report.sha256 ?? '';
   page = 0;
@@ -332,8 +336,16 @@ async function showHex(offset, selection = highlighted) {
 const comparisonLabels = {
   added: 'Added', removed: 'Removed', changed: 'Content metadata differs',
   repacked: 'Packing differs', moved: 'Offset differs', matched: 'Metadata matches',
-  ambiguous: 'Duplicate path', encrypted: 'Encrypted entry'
+  ambiguous: 'Duplicate path', encrypted: 'Encrypted entry', payloadChanged: 'Payload bytes differ'
 };
+
+function compareEvidence(payload) {
+  if (!payload) return '—';
+  if (payload.status === 'equal') return 'Byte-for-byte match';
+  if (payload.status === 'failed') return 'Could not verify · ' + payload.reason;
+  const first = 'First difference at ' + address(payload.firstDifference);
+  return first + (payload.sameSizeAndCrc32 ? ' · Same size and CRC32' : '');
+}
 
 function renderComparison() {
   const query = byId('comparison-search').value.trim().toLowerCase();
@@ -342,9 +354,19 @@ function renderComparison() {
   definitions(byId('comparison-stats'), Object.fromEntries(
     Object.entries(scope.counts).map(([key, count]) => [comparisonLabels[key], digits.format(count)])
   ));
-  const matches = scope.rows.filter(row =>
-    row.name.toLowerCase().includes(query) || comparisonLabels[row.status].toLowerCase().includes(query)
-  );
+  const coverage = scope.payloadCoverage?.counts;
+  byId('comparison-match-option').hidden = !coverage;
+  const showMatches = byId('comparison-show-matches').checked;
+  const visible = scope.rows.filter(row => row.status !== 'matched' || row.payload?.status === 'failed' || showMatches);
+  const matches = visible.filter(row => [row.name, comparisonLabels[row.status], compareEvidence(row.payload)]
+    .some(value => value.toLowerCase().includes(query)));
+  const skipped = coverage ? coverage.shared - coverage.attempted : 0;
+  byId('comparison-note').textContent = coverage
+    ? coverage.attempted + ' of ' + coverage.shared + ' shared paths checked · ' + coverage.equal + ' byte-for-byte matches · ' +
+      coverage.different + ' different · ' + coverage.failed + ' could not verify · ' + skipped + ' skipped' +
+      (skipped ? ' (' + coverage.ambiguous + ' duplicate, ' + coverage.unavailable + ' unsupported or encrypted, ' +
+        (coverage.sizeLimit + coverage.budgetLimit) + ' over limits).' : '.')
+    : 'Comparison uses ZIP directory metadata. Matching sizes and CRC32 do not prove byte equality.';
   const last = Math.max(0, Math.ceil(matches.length / pageSize) - 1);
   comparisonPage = Math.min(comparisonPage, last);
   const items = matches.slice(comparisonPage * pageSize, (comparisonPage + 1) * pageSize);
@@ -352,15 +374,15 @@ function renderComparison() {
     const tr = node('tr');
     const packed = group => group.length > 1 ? group.length + ' entries' : bytes(group[0]?.packed);
     const delta = entry.packedDelta > 0 ? '+' + bytes(entry.packedDelta) : bytes(entry.packedDelta);
-    for (const value of [entry.name, comparisonLabels[entry.status], packed(entry.before), packed(entry.after), delta]) {
+    for (const value of [entry.name, comparisonLabels[entry.status], compareEvidence(entry.payload), packed(entry.before), packed(entry.after), delta]) {
       tr.append(node('td', value));
     }
     return tr;
   });
   if (!rows.length) {
     const tr = node('tr');
-    const cell = node('td', scope.rows.length ? 'No matching changes.' : 'No differences in compared metadata.');
-    cell.colSpan = 5;
+    const cell = node('td', visible.length ? 'No matching results.' : 'No differences to display.');
+    cell.colSpan = 6;
     tr.append(cell);
     rows.push(tr);
   }
@@ -376,6 +398,7 @@ function showComparison(result) {
   comparison.path = current.path;
   comparisonPage = 0;
   byId('comparison-search').value = '';
+  byId('comparison-show-matches').checked = false;
   byId('comparison-path').textContent = result.baseline + ' → ' + result.candidate;
   const option = (title, value) => {
     const item = node('option', title);
@@ -387,15 +410,15 @@ function showComparison(result) {
   byId('comparison-scope-label').hidden = !groups.length;
   byId('comparison-scope').replaceChildren(option('Current archive', 0),
     ...groups.map((group, i) => option(group.path.join(' › '), i + 1)));
-  byId('comparison-note').textContent = 'Comparison uses ZIP directory metadata. Matching sizes and CRC32 do not prove byte equality.';
   byId('comparison-notices').hidden = !nested;
   byId('comparison-notices').open = false;
   if (nested) {
     byId('comparison-notices-title').textContent = groups.length + ' nested pairs compared · ' +
+      (nested.byteEqualArchives ? nested.byteEqualArchives + ' byte-for-byte archive matches · ' : '') +
       nested.matchingArchives + ' metadata matches not reopened · ' + nested.skipped + ' skipped';
     const notices = nested.notices.map(item => node('li', item.path.join(' › ') + ' — ' + item.reason));
     if (nested.skipped > notices.length) notices.push(node('li', 'Additional skipped paths are counted in the total.'));
-    if (!notices.length) notices.push(node('li', 'No skipped archive paths besides metadata matches.'));
+    if (!notices.length) notices.push(node('li', 'No additional skipped archive paths.'));
     byId('comparison-notice-list').replaceChildren(...notices);
   }
   renderComparison();
@@ -502,10 +525,12 @@ candidateInput.addEventListener('change', () => {
   const file = candidateInput.files[0];
   candidateInput.value = '';
   const nested = byId('nested-compare').checked;
-  if (file) perform('Comparing archives…', async () => showComparison(await call('compare', { file, nested })));
+  const verifyPayloads = byId('verify-content').checked;
+  if (file) perform('Comparing archives…', async () => showComparison(await call('compare', { file, nested, verifyPayloads })));
 });
 byId('comparison-scope').addEventListener('change', () => { comparisonPage = 0; renderComparison(); });
 byId('comparison-search').addEventListener('input', () => { comparisonPage = 0; renderComparison(); });
+byId('comparison-show-matches').addEventListener('change', () => { comparisonPage = 0; renderComparison(); });
 byId('comparison-prev').addEventListener('click', () => { comparisonPage--; renderComparison(); });
 byId('comparison-next').addEventListener('click', () => { comparisonPage++; renderComparison(); });
 
@@ -601,31 +626,51 @@ byId('hex-next').addEventListener('click', () =>
 byId('endian').addEventListener('change', renderInspector);
 
 function renderStrings(result) {
+  byId('string-next').hidden = !result?.next;
   if (!result) {
-    byId('string-info').textContent = '';
+    byId('string-info').textContent = 'Scans up to 4 MiB or 500 matches per pass.';
     byId('string-rows').replaceChildren();
     return;
   }
-  byId('string-info').textContent = digits.format(result.rows.length) + ' strings in ' +
-    bytes(result.scannedBytes) + (result.truncated ? ' · Result limit reached' : '');
-  byId('string-rows').replaceChildren(...result.rows.map(({ offset, encoding, text }) => {
+  byId('string-info').textContent = digits.format(result.rows.length) + ' strings · ' +
+    address(result.from) + ' to ' + address(result.end) + ' (exclusive)' +
+    (result.limited || result.truncated ? ' · Result limit reached' : '');
+  byId('string-rows').replaceChildren(...result.rows.map(row => {
+    const { offset, encoding, text, byteLength, length, continuation, continues } = row;
     const tr = node('tr');
     const at = node('td');
-    at.append(actionButton(address(offset), () =>
-      perform('Reading bytes…', async () => {
-        await showHex(offset, null);
-        setTab('hex', true);
-      })
-    ));
-    tr.append(at, node('td', encoding), node('td', text));
+    at.append(actionButton(address(offset), () => jumpTo(offset, byteLength)));
+    const preview = (continuation ? '…' : '') + text + (continues || length > 240 ? '…' : '');
+    tr.append(at, node('td', encoding), node('td', preview));
     return tr;
   }));
 }
 
-byId('scan').addEventListener('click', () => perform('Scanning strings…', async () => {
-  current.report.strings = await call('strings');
+async function scanText(options) {
+  current.report.strings = await call('strings', { stringOptions: options });
+  byId('string-offset').value = address(options.offset);
   renderStrings(current.report.strings);
-}));
+}
+
+byId('string-form').addEventListener('submit', event => {
+  event.preventDefault();
+  perform('Scanning strings…', () => scanText({
+    offset: parseOffset(byId('string-offset').value),
+    mode: byId('string-encoding').value,
+    minLength: byId('string-min').valueAsNumber
+  }));
+});
+byId('string-next').addEventListener('click', () => {
+  const { next, mode, minLength } = current.report.strings;
+  if (next) perform('Continuing string scan…', () => {
+    byId('string-encoding').value = mode;
+    byId('string-min').value = minLength;
+    return scanText({ ...next, mode, minLength });
+  });
+});
+for (const id of ['string-encoding', 'string-min', 'string-offset']) {
+  byId(id).addEventListener('input', () => { byId('string-next').hidden = true; });
+}
 
 byId('hash-cancel').addEventListener('click', () => {
   if (hashRequest == null) return;

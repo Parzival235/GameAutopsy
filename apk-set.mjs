@@ -1,4 +1,4 @@
-import { analyze, MiB, openZipMember, zipLocalInfo } from './formats.mjs?v=0.8.0';
+import { analyze, MiB, openZipMember, zipLocalInfo } from './formats.mjs?v=0.9.0';
 import { declaredApkSigners } from './apk-certs.mjs';
 import { parseBundletoolToc } from './bundletool-toc.mjs';
 

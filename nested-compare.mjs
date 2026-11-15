@@ -1,15 +1,13 @@
-import { analyze, MiB, openZipMember } from './formats.mjs?v=0.8.0';
-import { compareArchives, entriesByName } from './compare.mjs';
+import { analyze, MiB, openZipMember } from './formats.mjs?v=0.9.0';
+import { compareArchives, entriesByName } from './compare.mjs?v=0.9.0';
+import { archivePriority, nestedZipName } from './zip-content-diff.mjs?v=0.9.0';
 
 const maxDepth = 3;
 const maxPairs = 24;
 const maxRows = 20000;
 const maxBytes = 256 * MiB;
-const archiveName = /\.(?:zip|apk|apks|xapk|aab|ipa|obb)$/i;
-const priority = name => /(?:^|\/)(?:base|universal)\.apk$/i.test(name) ? 0 : /\.apk$/i.test(name) ? 1 : 2;
-
-export async function compareNestedArchives(before, after, result, progress = () => {}) {
-  const coverage = { groups: [], notices: [], skipped: 0, matchingArchives: 0, attempted: 0, bytesBudgeted: 0 };
+export async function compareNestedArchives(before, after, result, progress = () => {}, verify) {
+  const coverage = { groups: [], notices: [], skipped: 0, matchingArchives: 0, byteEqualArchives: 0, attempted: 0, bytesBudgeted: 0 };
   let rows = 0;
 
   function skip(path, reason) {
@@ -20,9 +18,9 @@ export async function compareNestedArchives(before, after, result, progress = ()
   async function walk(left, right, parent, path) {
     const a = entriesByName(left.report);
     const b = entriesByName(right.report);
-    const names = [...new Set([...a.keys(), ...b.keys()])].filter(name => archiveName.test(name));
-    names.sort((x, y) => priority(x) - priority(y));
-    const statuses = new Map(parent.rows.map(row => [row.name, row.status]));
+    const names = [...new Set([...a.keys(), ...b.keys()])].filter(name => nestedZipName.test(name));
+    names.sort((x, y) => archivePriority(x) - archivePriority(y));
+    const compared = new Map(parent.rows.map(row => [row.name, row]));
     for (const name of names) {
       const location = [...path, name];
       const old = a.get(name);
@@ -41,7 +39,12 @@ export async function compareNestedArchives(before, after, result, progress = ()
         skip(location, 'Archive entry uses unsupported compression or encryption.');
         continue;
       }
-      const status = statuses.get(name) ?? 'matched';
+      const row = compared.get(name);
+      if (row?.payload?.status === 'equal') {
+        coverage.byteEqualArchives++;
+        continue;
+      }
+      const status = row?.status ?? 'matched';
       if (status === 'matched' || status === 'moved') {
         coverage.matchingArchives++;
         continue;
@@ -61,14 +64,21 @@ export async function compareNestedArchives(before, after, result, progress = ()
         const secondBlob = (await openZipMember(right.blob, second)).blob;
         const oldReport = await analyze(firstBlob, name);
         const newReport = await analyze(secondBlob, name);
+        const before = { blob: firstBlob, report: oldReport };
+        const after = { blob: secondBlob, report: newReport };
         const comparison = compareArchives(oldReport, newReport);
+        if (verify && comparison.rows.length <= maxRows - rows) {
+          const checked = await verify(before, after, progress);
+          Object.assign(comparison, compareArchives(oldReport, newReport, checked));
+        }
         if (comparison.rows.length > maxRows - rows) {
           skip(location, 'The nested comparison would exceed the total result-row limit.');
           continue;
         }
         rows += comparison.rows.length;
-        coverage.groups.push({ path: location, counts: comparison.counts, rows: comparison.rows });
-        await walk({ blob: firstBlob, report: oldReport }, { blob: secondBlob, report: newReport }, comparison, location);
+        coverage.groups.push({ path: location, counts: comparison.counts, rows: comparison.rows,
+          ...(comparison.payloadCoverage ? { payloadCoverage: comparison.payloadCoverage } : {}) });
+        await walk(before, after, comparison, location);
       } catch (error) {
         skip(location, error.message);
       }

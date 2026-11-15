@@ -21,13 +21,13 @@ GameAutopsy is a read-only game-file inspector that runs in your browser. Open t
 | Android binary XML | UTF-8 and UTF-16LE pools, XML elements, attributes and typed values with exact record offsets. Manifest summary covers package, split, version, SDK levels and declared permissions. |
 | Godot PCK v0–v4 | Standalone pack directories, paths, declared MD5, payload ranges and entry flags. Open or save ordinary unencrypted files. |
 | IL2CPP metadata | Signature and selected header fields. |
-| Any file | Hex, typed values, resumable UTF-8 and wildcard byte search, entropy, string samples and optional SHA-256. |
+| Any file | Hex, typed values, resumable UTF-8 and wildcard byte search, entropy, Unicode string scans and optional SHA-256. |
 
 Offsets use bytes from the start of the current file unless labeled otherwise. ZIP structure offsets point to local headers. After opening an entry, **Format and source details** gives the local header and payload offsets in the parent archive. UnityFS file entries have a separate `streamOffset` into the decoded stream, while UnityFS block offsets point into the original bundle.
 
 ## Export a full analysis report
 
-Click **Export full JSON** to create one `.gameautopsy-full.json` file for the current root and files opened in this session. The export runs any missing standard analyses on the active file: a first hex preview with both byte orders, the bounded string scan, and SHA-256 up to 256 MiB. To include a digest for a larger file, use **Compute SHA-256** first. The worker hashes 1 MiB slices, shows hashed bytes, and supports **Cancel SHA-256** during that manual operation. For a ZIP, it also runs layout checks and bounded CRC32 verification. For a supported root archive, it adds the inventory. **Current file JSON** still downloads just the open file's existing report.
+Click **Export full JSON** to create one `.gameautopsy-full.json` file for the current root and files opened in this session. The export runs any missing standard analyses on the active file: a first hex preview with both byte orders, a bounded UTF-8 and ASCII-wide string sample, and SHA-256 up to 256 MiB. To include a digest for a larger file, use **Compute SHA-256** first. The worker hashes 1 MiB slices, shows hashed bytes, and supports **Cancel SHA-256** during that manual operation. For a ZIP, it also runs layout checks and bounded CRC32 verification. For a supported root archive, it adds the inventory. **Current file JSON** still downloads just the open file's existing report.
 
 The combined JSON includes the file reports, inventory, and recorded byte searches, hex previews, ZIP checks and archive or byte comparisons. Run searches and comparisons before export to include those inputs and results. Each recorded operation has a source path and a route of member indices, which distinguish duplicate paths. `automatic` records completed, reused, skipped or failed checks, and `omitted` counts optional history beyond the 16 Mi-character shared budget or the 96-item cap per history collection. The active and root reports and latest inventory are included separately from that history budget. Opening a different root starts a new report session. Exports are assembled in the Web Worker.
 
@@ -55,11 +55,19 @@ Each pass covers up to 128 MiB of offsets. **Continue comparison** resumes after
 
 ## Compare two releases
 
-Open the older ZIP-based package, then choose **Compare archive** and pick the newer package. The comparison reads both central directories and shows added or removed paths, content metadata changes, packing changes, moved offsets, duplicate paths, and encrypted entries that need separate inspection.
+Open the older ZIP-based package, then choose **Compare archive** and pick the newer package. The default comparison reads both central directories and shows added or removed paths, content metadata changes, packing changes, moved offsets, duplicate paths, and encrypted entries. Packed delta measures the size of the compressed payload, excluding headers and padding.
 
-The packed delta is the change in an entry's compressed payload size, excluding headers and padding. The comparison uses declared uncompressed sizes and CRC32 values to classify likely content differences. Use SHA-256 on an opened entry when you need a stronger equality check. The default **Inspect nested archives** option also compares changed or repacked archive members found at the same path in both versions. Use **Archive scope** to switch from the outer package to a compared split APK or another nested ZIP. **Nested comparison coverage** reports skipped paths and metadata matches. The JSON keeps each archive path as a separate array so the same entry name in different split APKs stays distinct.
+Enable **Verify entry bytes** before selecting the newer package to compare decoded payloads at shared, unique paths. The worker checks each local header, decoded size and CRC32, then compares the decoded bytes directly. A row can show **Payload bytes differ** even when the declared sizes and CRC32 match. The first difference is relative to the decoded entry. Appended or removed tails are included. Enable **Show verified matches** to review confirmed equal entries. Unreadable payloads and skipped paths are counted separately from verified matches.
 
-Nested comparison follows archive extensions and exact case-sensitive paths to a maximum depth of three, up to 24 pairs, 20,000 nested diff rows, and 256 MiB of combined declared packed and unpacked input. Entries added or removed as whole archives appear at their parent level. Unchanged metadata outside an archive does not trigger reopening it. Clear the checkbox for a single-level comparison.
+**Inspect nested archives** looks inside changed or repacked same-path ZIP members. In verification mode it also opens archive members with equal metadata and different verified bytes, and skips confirmed byte-for-byte matches. **Archive scope** switches between the outer package and a compared split APK or nested ZIP. The JSON records paths as arrays and includes content verdicts and limits for each scope.
+
+Nested traversal follows case-sensitive names to a maximum depth of three, up to 24 archive pairs, 20,000 nested result rows, and 256 MiB of declared packed plus unpacked input. Verification shares a separate 512-pair and 192 MiB input budget across scopes. It attempts up to 256 pairs per scope. Each packed or decoded payload must be at most 32 MiB. Stored and Deflate entries are supported. A match describes the bytes of a decoded entry. APK signature validity and installability require separate checks.
+
+## Find strings in binary files
+
+Open **Strings**, choose **UTF-8**, **UTF-16LE**, **UTF-16BE**, or **ASCII**, set a hexadecimal or decimal offset, and select **Scan strings**. UTF-16 code units are aligned from the chosen offset. The minimum length counts Unicode characters. Each row gives the byte offset and links to the matching span in **Hex**.
+
+Each pass scans approximately 4 MiB and keeps up to 500 results. **Continue scan** resumes with the same encoding and length. Very long strings can appear as linked fragments across consecutive passes. JSON records each pass's start, end, continuation and full byte spans. The automatic full-report sample covers the first 4 MiB using UTF-8 and ASCII-compatible UTF-16LE at both alignments. Encodings are selected explicitly, so UTF-16 can still produce readable-looking sequences in binary data.
 
 ## Inspect an Android APK set
 
@@ -82,7 +90,7 @@ Open an APK, APKS, XAPK, or a ZIP/APKM containing APK members. Select **APK set 
 
 - Files and reports stay on the device. There is no backend, telemetry, or CDN dependency. To launch the app without internet access, serve a downloaded copy on localhost.
 - ZIP directories are limited to 20,000 entries or 24 MiB of directory data. ZIP comparison requires two complete directories. Encrypted, split, and unsupported compression formats remain visible as metadata when the directory can be read.
-- Nested ZIPs support six levels, up to 128 MiB per opened entry and 256 MiB total for entries held open. The string sampler scans the first 4 MiB and returns up to 500 results. Byte search accepts up to 128 bytes and stops each pass at 64 MiB, 200 matches or a comparison budget. Resume to scan farther.
+- Nested ZIPs support six levels, up to 128 MiB per opened entry and 256 MiB total for entries held open. Byte search accepts up to 128 bytes and stops each pass at 64 MiB, 200 matches or a comparison budget. Resume to scan farther.
 - PCK inspection supports standalone packs. The directory read is limited to 24 MiB or 20,000 entries. Declared MD5 values come from the directory. Encrypted directories, special entry payloads (including encrypted, delta, removal and sparse entries), and executable-embedded packs are outside this release.
 - UnityFS directory data is capped at 24 MiB. Compressed blocks are limited to 32 MiB each, and opened members to 128 MiB. Encrypted bundles are outside this release. Unity serialized inspection is limited to 24 MiB of metadata and 20,000 structure rows per file.
 - DEX inspection lists structures at the table level. DEX 041 traversal is limited to 64 logical headers and the overall structure row cap. Unknown future versions and malformed structures are reported with warnings.
@@ -99,7 +107,7 @@ On Windows, use `py -3` in place of `python3`. To publish a fork with GitHub Pag
 
 ## Development
 
-Run the generated-fixture tests with Node.js 22 or later.
+Run the generated-fixture tests with Node.js 22 or later. GitHub Actions runs the same suite on Node.js 22 and 24 on pushes to main and on pull requests.
 
 ```sh
 node --test tests/*.test.mjs
@@ -109,6 +117,7 @@ node --test tests/*.test.mjs
 | --- | --- |
 | [Android Studio APK Analyzer](https://developer.android.com/studio/debug/apk-analyzer#compare) and [bundletool](https://developer.android.com/tools/bundletool) | Compare entry-level size deltas and inspect same-path APKs within an APK set. |
 | [Godot pack reader](https://github.com/godotengine/godot/blob/master/core/io/file_access_pack.cpp) and [GDRETools](https://github.com/GDRETools/gdsdecomp) | Interpret standalone PCK directory versions and distinguish raw payload offsets from record offsets. |
+| [GNU strings](https://sourceware.org/binutils/docs/binutils/strings.html) | Select an encoding and minimum character length while preserving file offsets. |
 | [ImHex](https://github.com/WerWolv/ImHex#features) | Interpret the same bytes with different widths and byte orders. |
 | [Kaitai Struct Web IDE](https://kaitai.io/news/2024/02/21/web-ide-improvements.html) | Link structure rows to byte ranges and preserve parsed rows when a later record fails. |
 | [UABEA](https://github.com/nesrak1/UABEA) and [UnityPy issue 377](https://github.com/K0lb3/UnityPy/issues/377) | Open individual UnityFS members and use block flags even when packed and decoded sizes match. |

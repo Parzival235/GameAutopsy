@@ -16,7 +16,7 @@ function fingerprint(entry) {
   };
 }
 
-export function compareArchives(baseline, candidate) {
+export function compareArchives(baseline, candidate, verification) {
   if ([baseline, candidate].some(report => report.format !== 'ZIP' ||
       report.status !== 'ok' || report.rows.length !== report.details['Declared entries'])) {
     throw new Error('Comparison requires two complete ZIP directories. Check archive warnings and limits.');
@@ -40,12 +40,17 @@ export function compareArchives(baseline, candidate) {
     else if (a.packed !== b.packed || a.method !== b.method || a.flags !== b.flags) status = 'repacked';
     else if (a.offset !== b.offset) status = 'moved';
     else status = 'matched';
-    counts[status]++;
-    if (status === 'matched') continue;
+    const payload = verification?.evidence.get(name);
+    const metadataStatus = status;
+    if (payload?.status === 'different') status = 'payloadChanged';
+    counts[status] = (counts[status] ?? 0) + 1;
+    if (status === 'matched' && !payload) continue;
     rows.push({
       name, status, before: left.map(fingerprint), after: right.map(fingerprint),
+      ...(payload ? { metadataStatus, payload } : {}),
       packedDelta: status === 'ambiguous' ? null : (b?.packed ?? 0) - (a?.packed ?? 0)
     });
   }
-  return { schema: 'gameautopsy/zip-comparison/1', baseline: baseline.name, candidate: candidate.name, counts, rows };
+  return { schema: 'gameautopsy/zip-comparison/1', baseline: baseline.name, candidate: candidate.name, counts, rows,
+    ...(verification ? { payloadCoverage: verification.coverage } : {}) };
 }
