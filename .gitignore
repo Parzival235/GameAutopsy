@@ -20,3 +20,4 @@
 *.gameautopsy-inventory.json
 *.gameautopsy-byte-diff.json
 *.gameautopsy-full.json
+*.gameautopsy-apk-set.json

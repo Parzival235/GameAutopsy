@@ -1,4 +1,4 @@
-import { analyze, MiB, openZipMember } from './formats.mjs?v=0.6.0';
+import { analyze, MiB, openZipMember } from './formats.mjs?v=0.7.0';
 import { compareArchives, entriesByName } from './compare.mjs';
 
 const maxDepth = 3;

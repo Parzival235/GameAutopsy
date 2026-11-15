@@ -6,8 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Inspect game files directly on your device.">
   <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css?v=0.6.0">
-  <script type="module" src="./app.mjs?v=0.6.0"></script>
+  <link rel="stylesheet" href="./style.css?v=0.7.0">
+  <script type="module" src="./app.mjs?v=0.7.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -67,6 +67,7 @@
       <button id="tab-binary" aria-selected="false" aria-controls="binary" role="tab" tabindex="-1">Byte diff</button>
       <button id="tab-hex" aria-selected="false" aria-controls="hex" role="tab" tabindex="-1">Hex</button>
       <button id="tab-compare" aria-selected="false" aria-controls="comparison" role="tab" tabindex="-1" hidden>Comparison</button>
+      <button id="tab-apk-set" aria-selected="false" aria-controls="apk-set" role="tab" tabindex="-1" hidden>APK set</button>
       <button id="tab-checks" aria-selected="false" aria-controls="checks" role="tab" tabindex="-1" hidden>ZIP checks</button>
       <button id="tab-find" aria-selected="false" aria-controls="find" role="tab" tabindex="-1">Find bytes</button>
       <button id="tab-strings" aria-selected="false" aria-controls="strings" role="tab" tabindex="-1">Strings</button>
@@ -197,6 +198,42 @@
         <button id="comparison-next" class="secondary">Next →</button>
       </nav>
     </section>
+    <section id="apk-set" role="tabpanel" aria-labelledby="tab-apk-set" hidden>
+      <div class="table-tools">
+        <button id="apk-set-run" class="secondary">Inspect APK set</button>
+        <label>Device ABI<select id="apk-set-abi">
+          <option value="">Any ABI</option><option>arm64-v8a</option><option>armeabi-v7a</option>
+          <option>x86_64</option><option>x86</option><option>riscv64</option>
+        </select></label>
+        <button id="apk-set-export" class="secondary" hidden>Download APK set JSON ↓</button>
+      </div>
+      <p class="help">Checks declared package data, dependencies, ABI coverage and signer certificate fingerprints in the root archive.</p>
+      <div id="apk-set-result" hidden>
+        <p id="apk-set-info" class="help" aria-live="polite"></p>
+        <dl id="apk-set-summary" class="detail-grid"></dl>
+        <div class="table-tools">
+          <label>APK group<select id="apk-set-group"><option value="">All APKs</option></select></label>
+          <label>Find APK or native library<input id="apk-set-filter" type="search" placeholder="Split ID, file or ABI" autocomplete="off"></label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">APK</th><th scope="col">Split ID / role</th><th scope="col">Version code</th><th scope="col">Native ABIs</th><th scope="col">Declared signers</th><th scope="col">Action</th></tr></thead>
+            <tbody id="apk-set-rows"></tbody>
+          </table>
+        </div>
+        <h3>Findings</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Level</th><th scope="col">APK or group</th><th scope="col">Finding</th></tr></thead>
+            <tbody id="apk-set-findings"></tbody>
+          </table>
+        </div>
+        <nav id="apk-notes-pages" class="pager" aria-label="Findings pages" hidden>
+          <button id="apk-notes-prev" class="secondary">← Previous</button><span id="apk-notes-page"></span>
+          <button id="apk-notes-next" class="secondary">Next →</button>
+        </nav>
+      </div>
+    </section>
     <section id="checks" role="tabpanel" aria-labelledby="tab-checks" hidden>
       <div class="table-tools"><button id="run-checks" class="secondary">Check ZIP layout</button>
         <button id="verify-zip" class="secondary">Verify entry CRC32</button>
@@ -234,6 +271,6 @@
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.6.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.7.0</span></footer>
 </body>
 </html>

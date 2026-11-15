@@ -91,6 +91,7 @@ export function inspectAxml(bytes, out) {
   const namespaces = [];
   const manifest = {};
   const permissions = new Set();
+  const dependencies = new Set();
   const android = 'http://schemas.android.com/apk/res/android';
   const describe = (uri, name) => {
     const prefix = uri ? namespaces.findLast(binding => binding.uri === uri)?.prefix : null;
@@ -174,10 +175,16 @@ export function inspectAxml(bytes, out) {
             value, valueType: typed.type, valueData: hex(typed.data), depth: stack.length, note: value === null ? '(null)' : String(value)
           });
           if (!uri && element === 'manifest' && !parent) {
-            if (namespace === null && ['package', 'split'].includes(attr)) manifest[attr] = value;
-            if (namespace === android && ['versionCode', 'versionName'].includes(attr)) manifest[attr] = value;
+            if (namespace === null && ['package', 'split', 'configForSplit'].includes(attr)) manifest[attr] = value;
+            if (namespace === android && ['versionCode', 'versionCodeMajor', 'revisionCode'].includes(attr)) {
+              manifest[attr] = typed.type === 16 || typed.type === 17 ? typed.data : value;
+            }
+            if (namespace === android && ['versionName', 'isFeatureSplit', 'isSplitRequired', 'splitTypes', 'requiredSplitTypes'].includes(attr)) {
+              manifest[attr] = typed.value ?? value;
+            }
           }
           if (!uri && parent?.element === 'manifest' && !parent.uri && namespace === android) {
+            if (element === 'uses-split' && attr === 'name' && typeof value === 'string') dependencies.add(value);
             if (element === 'uses-sdk' && ['minSdkVersion', 'targetSdkVersion', 'maxSdkVersion'].includes(attr)) manifest[attr] = typed.value ?? value;
             if (/^uses-permission(?:-sdk-(?:23|m))?$/.test(element) && attr === 'name' && typeof value === 'string') permissions.add(value);
           }
@@ -199,9 +206,10 @@ export function inspectAxml(bytes, out) {
   }
   if (out.manifest) {
     manifest.permissions = [...permissions].sort();
+    if (dependencies.size) manifest.usesSplits = [...dependencies].sort();
     for (const [key, value] of Object.entries(manifest)) {
       if (key === 'permissions') out.details['Permissions declared'] = value.length;
-      else out.details['Manifest ' + key] = value ?? '(null)';
+      else out.details['Manifest ' + key] = Array.isArray(value) ? value.join(', ') : value ?? '(null)';
     }
   }
   if (stack.length || namespaces.length) throw new Error('AXML document ended with unclosed elements or namespaces.');

@@ -1,7 +1,7 @@
 import { inspectPck } from './pck.mjs';
-import { inspectAxml } from './axml.mjs';
+import { inspectAxml } from './axml.mjs?v=0.7.0';
 
-export const version = '0.6.0';
+export const version = '0.7.0';
 export const MiB = 1024 * 1024;
 const maxRows = 20000;
 const maxDirectory = 24 * MiB;

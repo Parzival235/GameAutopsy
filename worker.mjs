@@ -1,12 +1,13 @@
-import { preview, sampleStrings, MiB } from './formats.mjs?v=0.6.0';
-import { compareArchives } from './compare.mjs?v=0.6.0';
-import { compareNestedArchives } from './nested-compare.mjs?v=0.6.0';
-import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.6.0';
-import { searchBytes } from './byte-search.mjs?v=0.6.0';
-import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.6.0';
-import { buildInventory } from './inventory.mjs?v=0.6.0';
-import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.6.0';
+import { preview, sampleStrings, MiB } from './formats.mjs?v=0.7.0';
+import { compareArchives } from './compare.mjs?v=0.7.0';
+import { compareNestedArchives } from './nested-compare.mjs?v=0.7.0';
+import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.7.0';
+import { searchBytes } from './byte-search.mjs?v=0.7.0';
+import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.7.0';
+import { buildInventory } from './inventory.mjs?v=0.7.0';
+import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.7.0';
 import { interpretBytes } from './hex.mjs';
+import { canInspectApkSet, inspectApkSet } from './apk-set.mjs';
 import { createReportSession } from './report-session.mjs';
 
 const stack = [];
@@ -34,7 +35,9 @@ function current() {
 
 function listing() {
   const { path, report } = current();
-  return { path, report, inventoryAvailable: archiveFormat(stack[0].report.format) };
+  const root = stack[0].report;
+  return { path, report, inventoryAvailable: archiveFormat(root.format),
+    apkSetAvailable: canInspectApkSet(root) };
 }
 
 async function zipChecks(node, progress, verify = false, refresh = false) {
@@ -116,6 +119,9 @@ async function fullReport(progress) {
     () => zipChecks(node, progress));
   await job('zipCrc32', 'Verifying ZIP entry CRC32', node, !isZip ? 'notApplicable' : report.zipChecks?.integrity ? 'reused' : null,
     () => zipChecks(node, progress, true));
+  await job('apkSet', 'Inspecting APK set', root,
+    !canInspectApkSet(root.report) ? 'notApplicable' : root.report.apkSet ? 'reused' : null,
+    async () => { root.report.apkSet = await inspectApkSet(root, '', progress); });
   await job('inventory', 'Indexing the root archive', root,
     !archiveFormat(root.report.format) ? 'notApplicable' : inventory ? 'reused' : null,
     async () => { inventory = await buildInventory(root, progress); });
@@ -128,12 +134,13 @@ async function fullReport(progress) {
     output, name: root.report.name, files: payload.files.length, operations: payload.operations.length,
     warnings: automatic.filter(task => task.status === 'error' || task.status === 'sizeLimit').length,
     omitted: payload.omitted.files + payload.omitted.operations,
+    apkSet: root.report.apkSet,
     updates: { strings: report.strings, sha256: report.sha256, zipChecks: report.zipChecks },
     ...(inventory && !existingInventory ? { inventory } : {})
   };
 }
 
-async function run({ action, file, index, offset, query, mode, nested }, progress) {
+async function run({ action, file, index, offset, query, mode, nested, abi }, progress) {
   switch (action) {
     case 'open': {
       const node = await inspect(file, file.name, undefined, progress);
@@ -172,6 +179,25 @@ async function run({ action, file, index, offset, query, mode, nested }, progres
       for (const entryIndex of record.route) await appendMember(next, entryIndex, progress);
       stack.splice(0, stack.length, ...next);
       for (const node of next) session.retainFile(node);
+      bytePair = undefined;
+      return listing();
+    }
+    case 'apk-set': {
+      current();
+      const root = stack[0];
+      root.report.apkSet = await inspectApkSet(root, abi, progress);
+      return root.report.apkSet;
+    }
+    case 'apk-set-open': {
+      current();
+      const root = stack[0];
+      if (!root.report.apkSet?.items.some(item => item.entryIndex === index && index != null)) {
+        throw new Error('That APK entry cannot be opened.');
+      }
+      const next = [root];
+      await appendMember(next, index, progress);
+      stack.splice(0, stack.length, ...next);
+      session.retainFile(current());
       bytePair = undefined;
       return listing();
     }

@@ -1,10 +1,10 @@
-import { bytesAt, MiB, openZipMember, zipLocalInfo } from './formats.mjs?v=0.6.0';
+import { bytesAt, MiB, openZipMember, zipLocalInfo } from './formats.mjs?v=0.7.0';
 
 const labels = new Map([[0x7109871a, 'APK v2'], [0xf05368c0, 'APK v3'], [0x1b93ad61, 'APK v3.1']]);
 const hex = n => '0x' + n.toString(16).toUpperCase();
 const view = bytes => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
-async function signingBlock(blob, directory) {
+export async function readApkSigningBlock(blob, directory) {
   if (directory < 24) return null;
   const footer = await bytesAt(blob, directory - 24, 24);
   if (new TextDecoder().decode(footer.subarray(8)) !== 'APK Sig Block 42') return null;
@@ -38,7 +38,7 @@ export async function checkZip(blob, report, progress = () => {}) {
   const add = (status, name, message, offset = null) => checks.push({ status, name, message, offset });
   let signature = null;
   try {
-    signature = await signingBlock(blob, directory);
+    signature = await readApkSigningBlock(blob, directory);
     if (signature) for (const pair of signature.pairs) add('Info', pair.name, pair.id + ' · ' + pair.size + ' bytes', pair.offset);
   } catch (error) {
     add('Error', 'APK signing block', error.message, directory - 24);

@@ -52,6 +52,16 @@ The packed delta is the change in an entry's compressed payload size, excluding 
 
 Nested comparison follows archive extensions and exact case-sensitive paths to a maximum depth of three, up to 24 pairs, 20,000 nested diff rows, and 256 MiB of combined declared packed and unpacked input. Entries added or removed as whole archives appear at their parent level. Unchanged metadata outside an archive does not trigger reopening it. Clear the checkbox for a single-level comparison.
 
+## Inspect an Android APK set
+
+Open an APK, APKS, XAPK, or a ZIP/APKM containing APK members. Select **APK set → Inspect APK set**. Optionally choose the device ABI to flag when native libraries for that architecture are absent from an inspected group.
+
+- The inspector reads each APK's own binary manifest and reports package, split ID, full version code, declared split dependencies, and native libraries by ABI. **Find APK or native library** can locate Unity's `libil2cpp.so` across the set.
+- Bundletool `toc.pb` groups split APKs into variants and keeps standalone candidates separate. The XAPK reader handles manifests listing APKs in `split_apks[].file`. Without a usable TOC, group checks use the available manifests and report ambiguous base choices.
+- APK Signature Scheme v2/v3/v3.1 certificate SHA-256 values are extracted from declared signer records. The inspector compares matching schemes and SDK ranges. Signature validity, signing lineage, trust, and Android device-specific variant selection are outside this check.
+- Metadata inspection is limited to 128 APKs and 384 MiB of declared packed-plus-unpacked compressed members. Stored APK members can be read by range without verifying the container CRC. Unreadable members are listed separately, and absence checks use **Unknown** when coverage is incomplete.
+- **Download APK set JSON** saves the standalone report. **Export full JSON** includes the root's APK set report and automatically runs the default check if needed.
+
 ## Check an APK or ZIP
 
 - **Check ZIP layout** compares local headers to the central directory and reports duplicate paths, overlapping header or payload ranges, and invalid metadata. For APKs it also checks stored payload alignment at 4 bytes and stored native-library payload alignment at 16 KiB.

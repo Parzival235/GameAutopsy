@@ -7,13 +7,15 @@ const mobile = matchMedia('(max-width: 760px)');
 const setOrientation = () => document.querySelector('.tabs').setAttribute('aria-orientation', mobile.matches ? 'horizontal' : 'vertical');
 mobile.addEventListener('change', setOrientation);
 setOrientation();
-const tabs = { structure: 'structure', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.6.0', { type: 'module' });
+const tabs = { structure: 'structure', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', 'apk-set': 'apk-set', checks: 'checks', find: 'find', strings: 'strings' };
+const worker = new Worker('./worker.mjs?v=0.7.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
 let comparisonPage = 0;
 let inventory;
+let apkSet;
+let apkNotesPage = 0;
 let inventoryPage = 0;
 let binaryDiff;
 let binaryPage = 0;
@@ -245,6 +247,7 @@ function show(data) {
   byId('byte-result').hidden = true;
   byId('byte-export').hidden = true;
   byId('nested-option').hidden = report.format !== 'ZIP';
+  byId('tab-apk-set').hidden = !data.apkSetAvailable;
   byId('tab-checks').hidden = report.format !== 'ZIP';
   byId('download-member').hidden = path.length === 1;
   checkPage = 0;
@@ -466,6 +469,10 @@ function open(file) {
   if (file) perform('Inspecting file…', async () => {
     const result = await call('open', { file });
     inventory = undefined;
+    apkSet = undefined;
+    byId('apk-set-abi').value = '';
+    byId('apk-set-filter').value = '';
+    renderApkSet();
     renderInventory();
     show(result);
     byId('filename').scrollIntoView({ block: 'center' });
@@ -647,6 +654,7 @@ byId('export-full').addEventListener('click', () => perform('Preparing the full 
   byId('digest').textContent = current.report.sha256 ?? '';
   updateChecks();
   if (result.inventory) showInventory(result.inventory);
+  if (result.apkSet && !apkSet) showApkSet(result.apkSet);
   downloadBlob(result.output, result.name, '.gameautopsy-full.json');
   const feedback = byId('export-feedback');
   feedback.textContent = 'Full JSON prepared · ' + result.files + ' file reports · ' + result.operations + ' recorded operations' +
@@ -808,3 +816,108 @@ byId('byte-next').addEventListener('click', () => { binaryPage++; renderBinaryRa
 byId('byte-export').addEventListener('click', () =>
   downloadJson(binaryDiff, binaryDiff.after, '.gameautopsy-byte-diff.json')
 );
+
+function emptyTable(body, columns, label) {
+  const row = node('tr');
+  const cell = node('td', label);
+  cell.colSpan = columns;
+  row.append(cell);
+  body.replaceChildren(row);
+}
+
+function renderApkSet() {
+  byId('apk-set-result').hidden = !apkSet;
+  byId('apk-set-export').hidden = !apkSet;
+  if (!apkSet) return;
+  const groupIndex = byId('apk-set-group').value;
+  const group = groupIndex === '' ? null : apkSet.groups[Number(groupIndex)];
+  const paths = group ? new Set(group.paths) : null;
+  const query = byId('apk-set-filter').value.trim().toLowerCase();
+  const items = apkSet.items.filter(item =>
+    (!paths || paths.has(item.path)) && (!query || [
+      item.path, item.manifest?.split, item.role, ...(item.abis ?? []), ...(item.engines ?? []),
+      ...(item.native ?? []).map(lib => lib.path)
+    ].join(' ').toLowerCase().includes(query))
+  );
+  const body = byId('apk-set-rows');
+  if (!items.length) emptyTable(body, 6, 'No matching APKs.');
+  else body.replaceChildren(...items.map(item => {
+    const tr = node('tr');
+    const file = node('td', item.path);
+    if (item.error) file.append(node('p', item.error));
+    if (item.native?.length) {
+      const info = node('details');
+      info.append(node('summary', item.nativeCount + ' native libraries'));
+      const list = node('ul');
+      list.append(...item.native.slice(0, 24).map(lib => node('li', lib.path)));
+      if (item.nativeCount > 24) list.append(node('li', 'More entries are available in the JSON report.'));
+      info.append(list);
+      file.append(info);
+    }
+    tr.append(file, node('td', [item.manifest?.split, item.role].filter(Boolean).join(' · ') || '—'),
+      node('td', item.manifest?.longVersionCode ?? '—'), node('td', item.abis?.join(', ') || '—'));
+    const signer = node('td');
+    const schemes = item.signing?.schemes.filter(x => !x.error) ?? [];
+    if (!schemes.length) signer.textContent = 'Unavailable';
+    else {
+      const details = node('details');
+      details.append(node('summary', schemes.map(s => s.name).join(', ')));
+      for (const scheme of schemes) {
+        const list = node('ul');
+        for (const entry of scheme.signers) {
+          list.append(node('li', (entry.sdk ? 'SDK ' + entry.sdk.min + '–' + entry.sdk.max + ' · ' : '') + entry.certificateSha256));
+        }
+        details.append(node('strong', scheme.name), list);
+      }
+      signer.append(details);
+    }
+    tr.append(signer);
+    const actions = node('td');
+    if (item.entryIndex != null) actions.append(actionButton('Open', () => perform('Opening APK…', async () =>
+      show(await call('apk-set-open', { index: item.entryIndex })))));
+    tr.append(actions);
+    return tr;
+  }));
+  const findings = apkSet.findings.filter(item => !group || item.group === group.label || !item.group);
+  apkNotesPage = outputPage('apk-notes', apkNotesPage, findings.length);
+  const notes = byId('apk-set-findings');
+  if (!findings.length) emptyTable(notes, 3, 'No findings in the inspected metadata.');
+  else notes.replaceChildren(...findings.slice(apkNotesPage * pageSize, (apkNotesPage + 1) * pageSize).map(finding => {
+    const row = node('tr');
+    const level = node('td', finding.level);
+    level.dataset.level = finding.level.toLowerCase();
+    row.append(level, node('td', finding.path), node('td', finding.message));
+    return row;
+  }));
+}
+
+function showApkSet(result) {
+  apkSet = result;
+  apkNotesPage = 0;
+  definitions(byId('apk-set-summary'), {
+    Package: result.package ?? 'Unknown', APKs: result.inspected + ' / ' + result.declared,
+    'Native ABIs': result.abis.join(', ') || 'None observed',
+    'Engine libraries': [...new Set(result.nativeFiles.map(item => item.name))].join(', ') || 'None observed'
+  });
+  byId('apk-set-info').textContent = result.source + (result.abi ? ' · Device ABI ' + result.abi : '') +
+    ' · ' + result.skipped + ' APKs unreadable or skipped' +
+    (result.findingsMayBeTruncated ? ' · Findings limit reached' : '');
+  const selector = byId('apk-set-group');
+  const all = node('option', 'All APKs');
+  all.value = '';
+  selector.replaceChildren(all, ...result.groups.map((group, index) => {
+    const option = node('option', group.label);
+    option.value = String(index);
+    return option;
+  }));
+  renderApkSet();
+}
+
+byId('apk-set-run').addEventListener('click', () => perform('Inspecting APK set…', async () =>
+  showApkSet(await call('apk-set', { abi: byId('apk-set-abi').value }))
+));
+byId('apk-set-group').addEventListener('change', () => { apkNotesPage = 0; renderApkSet(); });
+byId('apk-set-filter').addEventListener('input', renderApkSet);
+byId('apk-notes-prev').addEventListener('click', () => { apkNotesPage--; renderApkSet(); });
+byId('apk-notes-next').addEventListener('click', () => { apkNotesPage++; renderApkSet(); });
+byId('apk-set-export').addEventListener('click', () => downloadJson(apkSet, apkSet.name, '.gameautopsy-apk-set.json'));

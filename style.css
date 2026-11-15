@@ -183,3 +183,11 @@ tbody tr:hover { background: #202a21; }
   .result-actions { gap: 7px; }
   .result-actions button { font-size: .82rem; }
 }
+
+#apk-set-result h3 { margin: 1.2rem 0 .55rem; font-size: .95rem; }
+#apk-set-group { max-width: min(29rem, 75vw); }
+#apk-set-rows details { max-width: 24rem; }
+#apk-set-rows summary { margin: .3rem 0; }
+#apk-set-rows ul { padding-inline-start: 1.15rem; }
+#apk-set-findings [data-level="error"], #apk-set-findings [data-level="warning"] { color: var(--warn); }
+#apk-set-findings [data-level="unknown"] { color: var(--muted); }
