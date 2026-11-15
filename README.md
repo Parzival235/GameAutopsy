@@ -18,7 +18,8 @@ GameAutopsy is a read-only game-file inspector that runs in your browser. Open t
 | PE32 / PE32+ | Architecture, entry RVA, image base, sections and data directories. |
 | UnityFS 6–8 | Header, block table and file directory for standard Raw, LZ4 and LZ4HC directories. Shows packed blocks and decoded file offsets. Open or save members that span Raw, LZ4 and LZ4HC blocks. |
 | Android binary XML | UTF-8 and UTF-16LE pools, XML elements, attributes and typed values with exact record offsets. Manifest summary covers package, split, version, SDK levels and declared permissions. |
-| Godot PCK / IL2CPP metadata | Signature and selected header fields. |
+| Godot PCK v0–v4 | Standalone pack directories, paths, declared MD5, payload ranges and entry flags. Open or save ordinary unencrypted files. |
+| IL2CPP metadata | Signature and selected header fields. |
 | Any file | Hex, typed values, resumable UTF-8 and wildcard byte search, entropy, string samples and optional SHA-256. |
 
 Offsets use bytes from the start of the current file unless labeled otherwise. ZIP structure offsets point to local headers. After opening an entry, **Format and source details** gives the local header and payload offsets in the parent archive. UnityFS file entries have a separate `streamOffset` into the decoded stream, while UnityFS block offsets point into the original bundle.
@@ -27,7 +28,9 @@ Offsets use bytes from the start of the current file unless labeled otherwise. Z
 
 Open the older ZIP-based package, then choose **Compare archive** and pick the newer package. The comparison reads both central directories and shows added or removed paths, content metadata changes, packing changes, moved offsets, duplicate paths, and encrypted entries that need separate inspection.
 
-The packed delta is the change in an entry's compressed payload size, excluding headers and padding. The comparison uses declared uncompressed sizes and CRC32 values to classify likely content differences. Use SHA-256 on an opened entry when you need a stronger equality check. Comparison is scoped to the current ZIP level and can be downloaded as JSON.
+The packed delta is the change in an entry's compressed payload size, excluding headers and padding. The comparison uses declared uncompressed sizes and CRC32 values to classify likely content differences. Use SHA-256 on an opened entry when you need a stronger equality check. The default **Inspect nested archives** option also compares changed or repacked archive members found at the same path in both versions. Use **Archive scope** to switch from the outer package to a compared split APK or another nested ZIP. **Nested comparison coverage** reports skipped paths and metadata matches. The JSON keeps each archive path as a separate array so the same entry name in different split APKs stays distinct.
+
+Nested comparison follows archive extensions and exact case-sensitive paths to a maximum depth of three, up to 24 pairs, 20,000 nested diff rows, and 256 MiB of combined declared packed and unpacked input. Entries added or removed as whole archives appear at their parent level. Unchanged metadata outside an archive does not trigger reopening it. Clear the checkbox for a single-level comparison.
 
 ## Check an APK or ZIP
 
@@ -41,6 +44,7 @@ The packed delta is the change in an entry's compressed payload size, excluding 
 - Files and reports stay on the device. There is no backend, telemetry, or CDN dependency. To launch the app without internet access, serve a downloaded copy on localhost.
 - ZIP directories are limited to 20,000 entries or 24 MiB of directory data. ZIP comparison requires two complete directories. Encrypted, split, and unsupported compression formats remain visible as metadata when the directory can be read.
 - Nested ZIPs support six levels, up to 128 MiB per opened entry and 256 MiB total for entries held open. Whole-file SHA-256 supports up to 256 MiB. The string sampler scans the first 4 MiB and returns up to 500 results. Byte search accepts up to 128 bytes and stops each pass at 64 MiB, 200 matches or a comparison budget. Resume to scan farther.
+- PCK inspection supports standalone packs. The directory read is limited to 24 MiB or 20,000 entries. Declared MD5 values come from the directory. Encrypted directories, special entry payloads (including encrypted, delta, removal and sparse entries), and executable-embedded packs are outside this release.
 - UnityFS opens individual files from standard bundles. LZ4/LZ4HC blocks are limited to 32 MiB each. LZMA, encrypted bundles and Unity serialized-object decoding are outside this release.
 - DEX inspection lists structures at the table level. DEX 041 traversal is limited to 64 logical headers and the overall structure row cap. Unknown future versions and malformed structures are reported with warnings.
 
@@ -64,7 +68,8 @@ node --test tests/*.test.mjs
 
 | Reference tool | What informed this release |
 | --- | --- |
-| [Android Studio APK Analyzer](https://developer.android.com/studio/debug/apk-analyzer#compare) | Compare package releases entry by entry and show size deltas. |
+| [Android Studio APK Analyzer](https://developer.android.com/studio/debug/apk-analyzer#compare) and [bundletool](https://developer.android.com/tools/bundletool) | Compare entry-level size deltas and inspect same-path APKs within an APK set. |
+| [Godot pack reader](https://github.com/godotengine/godot/blob/master/core/io/file_access_pack.cpp) and [GDRETools](https://github.com/GDRETools/gdsdecomp) | Interpret standalone PCK directory versions and distinguish raw payload offsets from record offsets. |
 | [ImHex](https://github.com/WerWolv/ImHex#features) | Interpret the same bytes with different widths and byte orders. |
 | [Kaitai Struct Web IDE](https://kaitai.io/news/2024/02/21/web-ide-improvements.html) | Link structure rows to byte ranges and preserve parsed rows when a later record fails. |
 | [UABEA](https://github.com/nesrak1/UABEA) and [UnityPy issue 377](https://github.com/K0lb3/UnityPy/issues/377) | Open individual UnityFS members and use block flags even when packed and decoded sizes match. |

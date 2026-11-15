@@ -117,3 +117,8 @@ footer { border-top: 1px solid var(--line); color: var(--muted); font: .74rem/1.
   border-radius: 3px;
   padding: .56rem .65rem;
 }
+
+.option { display: inline-flex; align-items: center; gap: .4rem; color: var(--muted); font-size: .9rem; }
+.option input { accent-color: var(--accent); }
+#comparison-scope { max-width: min(24rem, 75vw); }
+#comparison-notices { color: var(--muted); overflow-wrap: anywhere; }

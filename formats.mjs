@@ -1,6 +1,7 @@
+import { inspectPck } from './pck.mjs';
 import { inspectAxml } from './axml.mjs';
 
-export const version = '0.3.0';
+export const version = '0.4.0';
 export const MiB = 1024 * 1024;
 const maxRows = 20000;
 const maxDirectory = 24 * MiB;
@@ -708,13 +709,7 @@ export async function analyze(blob, name) {
       case 'PE': await parsePe(blob, out, head); break;
       case 'UnityFS': await parseUnity(blob, out, head); break;
       case 'Android binary XML': await parseAndroidXml(blob, out, head); break;
-      case 'Godot PCK':
-        if (head.length >= 20) {
-          const d = view(head);
-          out.details['Format version'] = d.getUint32(4, true);
-          out.details['Engine version'] = [8, 12, 16].map(at => d.getUint32(at, true)).join('.');
-        } else throw new Error('Missing PCK header.');
-        break;
+      case 'Godot PCK': await inspectPck(blob, out, head); break;
       case 'IL2CPP metadata':
         if (head.length < 8) throw new Error('Missing IL2CPP header.');
         out.details['Metadata version'] = view(head).getUint32(4, true);

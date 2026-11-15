@@ -1,5 +1,6 @@
-import { analyze, MiB, openUnityMember, openZipMember, preview, sampleStrings } from './formats.mjs?v=0.3.0';
-import { compareArchives } from './compare.mjs';
+import { analyze, MiB, openUnityMember, openZipMember, preview, sampleStrings } from './formats.mjs?v=0.4.0';
+import { compareArchives } from './compare.mjs?v=0.4.0';
+import { compareNestedArchives } from './nested-compare.mjs';
 import { checkZip, verifyZipPayloads } from './zip-checks.mjs';
 import { searchBytes } from './byte-search.mjs';
 
@@ -25,7 +26,7 @@ function listing() {
   };
 }
 
-async function run({ action, file, index, offset, query, mode }) {
+async function run({ action, file, index, offset, query, mode, nested }) {
   switch (action) {
     case 'open':
       stack.splice(0, stack.length, await inspect(file, file.name));
@@ -40,6 +41,10 @@ async function run({ action, file, index, offset, query, mode }) {
       if (report.format === 'UnityFS') {
         const member = await openUnityMember(blob, report, entry);
         stack.push(await inspect(member, entry.name, { streamOffset: entry.streamOffset }));
+      } else if (report.format === 'Godot PCK') {
+        if (entry.size > 128 * MiB) throw new Error('The PCK file exceeds the 128 MiB open limit.');
+        const member = blob.slice(entry.offset, entry.offset + entry.size);
+        stack.push(await inspect(member, entry.name, { dataOffset: entry.offset, declaredMd5: entry.declaredMd5 }));
       } else {
         const opened = await openZipMember(blob, entry);
         stack.push(await inspect(opened.blob, entry.name, {
@@ -52,9 +57,11 @@ async function run({ action, file, index, offset, query, mode }) {
       if (stack.length > 1) stack.pop();
       return listing();
     case 'compare': {
-      // Read only the candidate's ZIP directory, without touching workspace state.
-      const candidate = await analyze(file, file.name);
-      return compareArchives(current().report, candidate);
+      const before = current();
+      const after = await inspect(file, file.name);
+      const result = compareArchives(before.report, after.report);
+      if (nested) result.nested = await compareNestedArchives(before, after, result);
+      return result;
     }
     case 'checks': {
       const { blob, report } = current();

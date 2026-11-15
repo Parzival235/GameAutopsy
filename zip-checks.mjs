@@ -1,4 +1,4 @@
-import { bytesAt, MiB, openZipMember, zipLocalInfo } from './formats.mjs?v=0.3.0';
+import { bytesAt, MiB, openZipMember, zipLocalInfo } from './formats.mjs?v=0.4.0';
 
 const labels = new Map([[0x7109871a, 'APK v2'], [0xf05368c0, 'APK v3'], [0x1b93ad61, 'APK v3.1']]);
 const hex = n => '0x' + n.toString(16).toUpperCase();

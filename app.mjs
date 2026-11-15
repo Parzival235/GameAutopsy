@@ -4,7 +4,7 @@ const byId = id => document.getElementById(id);
 const pageSize = 80;
 const digits = new Intl.NumberFormat('en-US');
 const tabs = { structure: 'structure', hex: 'hex', compare: 'comparison', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.3.0', { type: 'module' });
+const worker = new Worker('./worker.mjs?v=0.4.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
@@ -102,6 +102,7 @@ function summarize(e) {
   if (e.line != null) values.push('Line ' + e.line);
   if (e.logicalIndex != null) values.push('DEX #' + (e.logicalIndex + 1));
   if (e.streamOffset != null) values.push('Decoded offset ' + address(e.streamOffset));
+  if (e.declaredMd5) values.push('MD5 ' + e.declaredMd5);
   if (e.note != null) values.push(e.note);
   return values.join(' · ') || '—';
 }
@@ -128,6 +129,9 @@ function renderRows() {
       actions.append(actionButton('Hex', () =>
         jumpTo(entry.offset, entry.packed == null ? entry.size : Math.min(entry.directoryOffset - entry.offset, 30))
       ));
+    }
+    if (entry.recordOffset != null) {
+      actions.append(actionButton('Record', () => jumpTo(entry.recordOffset, entry.recordSize)));
     }
     tr.append(actions);
     return tr;
@@ -173,6 +177,7 @@ function show(data) {
   byId('filename').textContent = report.name;
   byId('parent').hidden = path.length === 1;
   byId('compare').hidden = report.format !== 'ZIP';
+  byId('nested-option').hidden = report.format !== 'ZIP';
   byId('tab-checks').hidden = report.format !== 'ZIP';
   byId('download-member').hidden = path.length === 1;
   checkPage = 0;
@@ -193,7 +198,9 @@ function show(data) {
   });
   definitions(byId('details'), {
     ...details,
-    ...(source?.dataOffset != null ? { 'Local header in parent': address(source.localHeaderOffset), 'Data in parent': address(source.dataOffset) } : {}),
+    ...(source?.localHeaderOffset != null ? { 'Local header in parent': address(source.localHeaderOffset) } : {}),
+    ...(source?.dataOffset != null ? { 'Data in parent': address(source.dataOffset) } : {}),
+    ...(source?.declaredMd5 ? { 'Declared MD5 in parent': source.declaredMd5 } : {}),
     ...(source?.streamOffset != null ? { 'Decoded offset in parent': address(source.streamOffset) } : {})
   });
   byId('metadata').hidden = !Object.keys(details).length && !source;
@@ -251,7 +258,12 @@ const comparisonLabels = {
 
 function renderComparison() {
   const query = byId('comparison-search').value.trim().toLowerCase();
-  const matches = comparison.rows.filter(row =>
+  const index = Number(byId('comparison-scope').value);
+  const scope = index ? comparison.nested.groups[index - 1] : comparison;
+  definitions(byId('comparison-stats'), Object.fromEntries(
+    Object.entries(scope.counts).map(([key, count]) => [comparisonLabels[key], digits.format(count)])
+  ));
+  const matches = scope.rows.filter(row =>
     row.name.toLowerCase().includes(query) || comparisonLabels[row.status].toLowerCase().includes(query)
   );
   const last = Math.max(0, Math.ceil(matches.length / pageSize) - 1);
@@ -268,7 +280,7 @@ function renderComparison() {
   });
   if (!rows.length) {
     const tr = node('tr');
-    const cell = node('td', comparison.rows.length ? 'No matching changes.' : 'No differences in compared metadata.');
+    const cell = node('td', scope.rows.length ? 'No matching changes.' : 'No differences in compared metadata.');
     cell.colSpan = 5;
     tr.append(cell);
     rows.push(tr);
@@ -286,10 +298,27 @@ function showComparison(result) {
   comparisonPage = 0;
   byId('comparison-search').value = '';
   byId('comparison-path').textContent = result.baseline + ' → ' + result.candidate;
+  const option = (title, value) => {
+    const item = node('option', title);
+    item.value = value;
+    return item;
+  };
+  const nested = result.nested;
+  const groups = nested?.groups ?? [];
+  byId('comparison-scope-label').hidden = !groups.length;
+  byId('comparison-scope').replaceChildren(option('Current archive', 0),
+    ...groups.map((group, i) => option(group.path.join(' › '), i + 1)));
   byId('comparison-note').textContent = 'Comparison uses ZIP directory metadata. Matching sizes and CRC32 do not prove byte equality.';
-  definitions(byId('comparison-stats'), Object.fromEntries(
-    Object.entries(result.counts).map(([key, count]) => [comparisonLabels[key], digits.format(count)])
-  ));
+  byId('comparison-notices').hidden = !nested;
+  byId('comparison-notices').open = false;
+  if (nested) {
+    byId('comparison-notices-title').textContent = groups.length + ' nested pairs compared · ' +
+      nested.matchingArchives + ' metadata matches not reopened · ' + nested.skipped + ' skipped';
+    const notices = nested.notices.map(item => node('li', item.path.join(' › ') + ' — ' + item.reason));
+    if (nested.skipped > notices.length) notices.push(node('li', 'Additional skipped paths are counted in the total.'));
+    if (!notices.length) notices.push(node('li', 'No skipped archive paths besides metadata matches.'));
+    byId('comparison-notice-list').replaceChildren(...notices);
+  }
   renderComparison();
   byId('tab-compare').hidden = false;
   setTab('compare', true);
@@ -386,8 +415,10 @@ byId('compare').addEventListener('click', () => {
 candidateInput.addEventListener('change', () => {
   const file = candidateInput.files[0];
   candidateInput.value = '';
-  if (file) perform('Comparing archives…', async () => showComparison(await call('compare', { file })));
+  const nested = byId('nested-compare').checked;
+  if (file) perform('Comparing archives…', async () => showComparison(await call('compare', { file, nested })));
 });
+byId('comparison-scope').addEventListener('change', () => { comparisonPage = 0; renderComparison(); });
 byId('comparison-search').addEventListener('input', () => { comparisonPage = 0; renderComparison(); });
 byId('comparison-prev').addEventListener('click', () => { comparisonPage--; renderComparison(); });
 byId('comparison-next').addEventListener('click', () => { comparisonPage++; renderComparison(); });

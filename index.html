@@ -6,8 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Inspect game files directly on your device.">
   <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css?v=0.3.0">
-  <script type="module" src="./app.mjs?v=0.3.0"></script>
+  <link rel="stylesheet" href="./style.css?v=0.4.0">
+  <script type="module" src="./app.mjs?v=0.4.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -25,7 +25,7 @@
     <div>
       <h2>Open a game file</h2>
       <p>Drop a file here or choose one from your device.</p>
-      <p class="formats">APK · APKS · XAPK · ZIP · DEX · ELF · PE · UNITYFS</p>
+      <p class="formats">APK · APKS · XAPK · ZIP · DEX · ELF · PE · UNITYFS · GODOT PCK</p>
     </div>
     <button id="choose" class="primary">Choose file</button>
     <input type="file" id="file" hidden>
@@ -42,6 +42,7 @@
       </div>
       <div class="result-actions">
         <button id="compare" class="secondary" hidden>Compare archive</button>
+        <label id="nested-option" class="option" hidden><input id="nested-compare" type="checkbox" checked> Inspect nested archives</label>
         <button id="download-member" class="secondary" hidden>Save open entry ↓</button>
         <button id="export" class="secondary">Download JSON ↓</button>
       </div>
@@ -106,11 +107,16 @@
     <section id="comparison" role="tabpanel" aria-labelledby="tab-compare" hidden>
       <div class="table-tools">
         <button id="export-comparison" class="secondary">Download comparison JSON ↓</button>
+        <label id="comparison-scope-label" hidden>Archive scope <select id="comparison-scope"></select></label>
         <label>Filter changes <input id="comparison-search" type="search" placeholder="Path or status" autocomplete="off"></label>
       </div>
       <p id="comparison-path"></p>
       <dl id="comparison-stats"></dl>
       <p id="comparison-note"></p>
+      <details id="comparison-notices" hidden>
+        <summary id="comparison-notices-title">Nested comparison coverage</summary>
+        <ul id="comparison-notice-list"></ul>
+      </details>
       <div class="table-wrap">
         <table>
           <thead><tr><th scope="col">Path</th><th scope="col">Status</th><th scope="col">Current packed</th><th scope="col">Candidate packed</th><th scope="col">Packed delta</th></tr></thead>
@@ -158,6 +164,6 @@
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.3.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.4.0</span></footer>
 </body>
 </html>

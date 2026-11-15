@@ -1,4 +1,4 @@
-function entriesByName(report) {
+export function entriesByName(report) {
   const entries = new Map();
   for (const row of report.rows) {
     if (row.kind === 'Directory') continue;
