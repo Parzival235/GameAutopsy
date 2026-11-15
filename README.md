@@ -44,6 +44,19 @@ External reference rows report the declared path, GUID bytes and one-based File 
 
 Field decoding uses inline TypeTrees in serialized files 17–23. Objects with stripped or externally stored trees, managed references, newer tree layouts, and texture, audio or mesh conversion are outside this decoder's coverage. Managed-reference fields can stop decoding after an earlier usable prefix. Limits are 1 MiB of tree data, 12,000 tree nodes, 48 levels, 5,000 output rows and an 8 MiB payload read. Known byte ranges can still be recorded and saved without loading the entire payload.
 
+## Compare Unity objects across versions
+
+Open the baseline Unity serialized file, including one opened from a bundle. In **Unity diff**, choose the new serialized file or a UnityFS bundle. For a bundle, choose the member to compare. Leave **Path ID** blank for a bulk pass or enter one signed 64-bit decimal ID. Choose **Compare Unity files**.
+
+The comparison pairs unique Path IDs in the two selected files. A Path ID is local to its serialized file. If a rebuild assigns new IDs, these results describe added and removed IDs. Object names are never used as substitute matches.
+
+- Equal byte ranges can be reported separately from objects that moved. Both sides' offsets refer to their own serialized file.
+- When supported TypeTrees are available, field evidence contains the field path, value and offset on each side. Data fields are compared at their declared byte ranges, including bytes beyond the on-screen preview. A changed external table can change a pointer target even when the object's bytes are identical. Resolved external pointers are compared using their declared path, GUID, reference type and target ID.
+- Duplicate IDs, unreadable ranges and potentially missing objects in an incomplete index are reported as unresolved. Partial field comparisons can prove a specific change. They cannot establish that every field matches.
+- **Download Unity diff JSON** includes object and field evidence, source paths, coverage and limits. The comparison is also recorded in **Export full JSON**.
+
+A run checks up to 768 payload pairs, with an 8 MiB per-object limit and a 128 MiB shared budget for payload and field reads. The JSON includes counts for omitted rows and field evidence. Use the **Path ID** filter to check a specific object outside the bulk pass.
+
 ## Search an entire package
 
 Open a ZIP-based package, UnityFS bundle, or standalone PCK and select **Inventory → Index root archive**. Filter by category or search for words from the filename, parent container path, row kind, or detected archive format. **Open** reconstructs the entry's location in the root package. The inventory stays available while you navigate its entries.

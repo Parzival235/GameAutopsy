@@ -1,24 +1,26 @@
-import { preview } from './formats.mjs?v=0.11.0';
-import { compareArchives } from './compare.mjs?v=0.11.0';
-import { compareNestedArchives } from './nested-compare.mjs?v=0.11.0';
-import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.11.0';
-import { searchBytes } from './byte-search.mjs?v=0.11.0';
-import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.11.0';
-import { buildInventory } from './inventory.mjs?v=0.11.0';
-import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.11.0';
+import { preview } from './formats.mjs?v=0.12.0';
+import { compareArchives } from './compare.mjs?v=0.12.0';
+import { compareNestedArchives } from './nested-compare.mjs?v=0.12.0';
+import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.12.0';
+import { searchBytes } from './byte-search.mjs?v=0.12.0';
+import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.12.0';
+import { buildInventory } from './inventory.mjs?v=0.12.0';
+import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.12.0';
 import { interpretBytes } from './hex.mjs';
 import { canInspectApkSet, inspectApkSet } from './apk-set.mjs';
 import { createReportSession } from './report-session.mjs';
-import { createPayloadComparison } from './zip-content-diff.mjs?v=0.11.0';
-import { sampleStrings, scanStrings } from './string-scan.mjs?v=0.11.0';
-import { openZipEntryPair } from './zip-entry-pair.mjs?v=0.11.0';
-import { inspectUnityFields } from './unity-fields.mjs?v=0.11.0';
-import { hashSha256 } from './sha256.mjs?v=0.11.0';
+import { createPayloadComparison } from './zip-content-diff.mjs?v=0.12.0';
+import { sampleStrings, scanStrings } from './string-scan.mjs?v=0.12.0';
+import { openZipEntryPair } from './zip-entry-pair.mjs?v=0.12.0';
+import { compareUnityFiles } from './unity-diff.mjs?v=0.12.0';
+import { inspectUnityFields } from './unity-fields.mjs?v=0.12.0';
+import { hashSha256 } from './sha256.mjs?v=0.12.0';
 
 const stack = [];
 let inventory;
 let bytePair;
 let archivePair;
+let unityCandidate;
 let session = createReportSession();
 let activeHash;
 
@@ -128,7 +130,7 @@ async function scanBytePair(node, pair, offset, progress, previewOffset) {
   });
 }
 
-async function run({ action, file, index, offset, query, mode, nested, abi, verifyPayloads, stringOptions, scope, entryName, side }, progress, signal) {
+async function run({ action, file, index, offset, query, mode, nested, abi, verifyPayloads, stringOptions, scope, entryName, side, pathId }, progress, signal) {
   switch (action) {
     case 'open': {
       const node = await inspect(file, file.name, undefined, progress);
@@ -138,6 +140,7 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       inventory = undefined;
       bytePair = undefined;
       archivePair = undefined;
+      unityCandidate = undefined;
       session = createReportSession();
       return listing();
     }
@@ -146,18 +149,21 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       session.retainFile(current());
       bytePair = undefined;
       archivePair = undefined;
+      unityCandidate = undefined;
       return listing();
     case 'ancestor':
       if (!Number.isInteger(index) || index < 0 || index >= stack.length) throw new Error('That parent is not open.');
       stack.splice(index + 1);
       bytePair = undefined;
       archivePair = undefined;
+      unityCandidate = undefined;
       return listing();
     case 'parent':
       if (stack.length > 1) {
         stack.pop();
         bytePair = undefined;
         archivePair = undefined;
+        unityCandidate = undefined;
       }
       return listing();
     case 'inventory':
@@ -173,6 +179,7 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       for (const node of next) session.retainFile(node);
       bytePair = undefined;
       archivePair = undefined;
+      unityCandidate = undefined;
       return listing();
     }
     case 'apk-set': {
@@ -193,9 +200,37 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       session.retainFile(current());
       bytePair = undefined;
       archivePair = undefined;
+      unityCandidate = undefined;
       return listing();
     }
     case 'full-report': return fullReport(progress);
+    case 'unity-diff-candidate': {
+      if (!current().report.unitySerialized) throw new Error('Open a baseline Unity serialized file first.');
+      const candidate = await inspect(file, file.name, undefined, progress);
+      const report = candidate.report;
+      if (!report.unitySerialized && report.format !== 'UnityFS') {
+        throw new Error('Choose a Unity serialized file or a supported UnityFS bundle.');
+      }
+      const members = report.format === 'UnityFS' ? report.rows.flatMap((row, index) =>
+        row.kind === 'UnityFS file' && row.open ? [{ index, name: row.name, size: row.size }] : []
+      ) : [];
+      if (!report.unitySerialized && !members.length) throw new Error('This bundle has no readable member directory.');
+      unityCandidate = candidate;
+      return { name: report.name, members };
+    }
+    case 'unity-diff': {
+      const node = current();
+      if (!unityCandidate || !node.report.unitySerialized) throw new Error('Choose both Unity files first.');
+      let after = unityCandidate;
+      if (unityCandidate.report.format === 'UnityFS') {
+        const member = unityCandidate.report.rows[index];
+        if (member?.kind !== 'UnityFS file' || !member.open) throw new Error('Choose a candidate bundle member.');
+        after = await openMember(unityCandidate, member, progress);
+        after.report.source.container = unityCandidate.report.name;
+      }
+      const result = await compareUnityFiles(node, after, pathId, progress);
+      return session.record(node, 'unityDiff', result, { pathId: result.pathId });
+    }
     case 'unity-fields': {
       const node = current();
       const result = await inspectUnityFields(node.blob, node.report, index, progress);

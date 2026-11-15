@@ -22,3 +22,4 @@
 *.gameautopsy-full.json
 *.gameautopsy-apk-set.json
 *.gameautopsy-unity-fields.json
+*.gameautopsy-unity-diff.json

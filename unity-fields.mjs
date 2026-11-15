@@ -177,7 +177,7 @@ function readValues(bytes, root, entry, info) {
     ...(textAsset ? { textAsset } : {}) };
 }
 
-export async function inspectUnityFields(blob, report, index, progress = () => {}) {
+export async function inspectUnityFields(blob, report, index, progress = () => {}, { resolveTargets = true } = {}) {
   const entry = report.rows[index];
   const info = report.unitySerialized;
   const tree = info?.typeTrees?.[entry?.typeIndex];
@@ -191,25 +191,27 @@ export async function inspectUnityFields(blob, report, index, progress = () => {
   const bytes = new Uint8Array(await blob.slice(entry.offset, entry.offset + Math.min(entry.size, maxRead)).arrayBuffer());
   progress({ stage: 'Decoding Unity object fields' });
   const result = readValues(bytes, schema, entry, info);
-  const local = new Map();
-  for (const [rowIndex, row] of report.rows.entries()) {
-    if (row.kind === 'Unity object') local.set(row.pathId, local.has(row.pathId) ? null : rowIndex);
-  }
-  const externals = new Map(info.externals.map(item => [item.fileId, item.path]));
-  for (const row of result.rows) {
-    const ref = row.reference;
-    if (!ref || ref.pathId === '0') continue;
-    if (ref.fileId === 0) {
-      const target = local.get(ref.pathId);
-      const indexed = report.rows[target];
-      if (indexed) {
-        ref.target = {
-          index: target, name: indexed.name, offset: indexed.offset, size: indexed.size,
-          fields: indexed.offset != null && indexed.size > 0 && Boolean(info.typeTrees[indexed.typeIndex])
-        };
+  if (resolveTargets) {
+    const local = new Map();
+    for (const [rowIndex, row] of report.rows.entries()) {
+      if (row.kind === 'Unity object') local.set(row.pathId, local.has(row.pathId) ? null : rowIndex);
+    }
+    const externals = new Map(info.externals.map(item => [item.fileId, item.path]));
+    for (const row of result.rows) {
+      const ref = row.reference;
+      if (!ref || ref.pathId === '0') continue;
+      if (ref.fileId === 0) {
+        const target = local.get(ref.pathId);
+        const indexed = report.rows[target];
+        if (indexed) {
+          ref.target = {
+            index: target, name: indexed.name, offset: indexed.offset, size: indexed.size,
+            fields: indexed.offset != null && indexed.size > 0 && Boolean(info.typeTrees[indexed.typeIndex])
+          };
+        }
+      } else if (externals.has(ref.fileId)) {
+        ref.externalPath = externals.get(ref.fileId);
       }
-    } else if (externals.has(ref.fileId)) {
-      ref.externalPath = externals.get(ref.fileId);
     }
   }
   return { schema: 'gameautopsy/unity-fields/1', pathId: entry.pathId, className: entry.className,

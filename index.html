@@ -6,8 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Inspect game files directly on your device.">
   <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css?v=0.11.0">
-  <script type="module" src="./app.mjs?v=0.11.0"></script>
+  <link rel="stylesheet" href="./style.css?v=0.12.0">
+  <script type="module" src="./app.mjs?v=0.12.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -30,6 +30,7 @@
     <input type="file" id="file" hidden>
     <input type="file" id="candidate" hidden>
     <input type="file" id="byte-candidate" hidden>
+    <input type="file" id="unity-diff-file" hidden>
   </section>
   <section id="activity" class="activity" aria-label="Analysis activity" hidden>
     <div class="activity-line">
@@ -66,6 +67,7 @@
     <div class="tabs" role="tablist" aria-label="Analysis views">
       <button id="tab-structure" aria-selected="true" aria-controls="structure" role="tab">Structure</button>
       <button id="tab-unity-fields" aria-selected="false" aria-controls="unity-fields" role="tab" tabindex="-1" hidden>Unity fields</button>
+      <button id="tab-unity-diff" aria-selected="false" aria-controls="unity-diff" role="tab" tabindex="-1" hidden>Unity diff</button>
       <button id="tab-inventory" aria-selected="false" aria-controls="inventory" role="tab" tabindex="-1" hidden>Inventory</button>
       <button id="tab-binary" aria-selected="false" aria-controls="binary" role="tab" tabindex="-1">Byte diff</button>
       <button id="tab-hex" aria-selected="false" aria-controls="hex" role="tab" tabindex="-1">Hex</button>
@@ -114,6 +116,44 @@
         <span id="unity-fields-page"></span>
         <button id="unity-fields-next" class="secondary">Next →</button>
       </nav>
+    </section>
+    <section id="unity-diff" role="tabpanel" aria-labelledby="tab-unity-diff" hidden>
+      <form id="unity-diff-form" class="table-tools">
+        <button id="unity-diff-choose" type="button" class="secondary">Choose Unity candidate</button>
+        <label id="unity-diff-member-label" hidden>Candidate member <select id="unity-diff-member"></select></label>
+        <label>Path ID <input id="unity-diff-id" placeholder="All objects" autocomplete="off" inputmode="text"></label>
+        <button id="unity-diff-run" class="secondary" type="submit" disabled>Compare Unity files</button>
+      </form>
+      <p id="unity-diff-candidate-name" class="help"></p>
+      <div id="unity-diff-output" hidden>
+        <div class="table-tools">
+          <button id="unity-diff-export" class="secondary">Download Unity diff JSON ↓</button>
+          <label>Filter results <input id="unity-diff-query" type="search" placeholder="Path ID, class or status" autocomplete="off"></label>
+        </div>
+        <p class="help" id="unity-diff-coverage" aria-live="polite"></p>
+        <dl id="unity-diff-counts" class="detail-grid"></dl>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Path ID</th><th scope="col">Class</th><th scope="col">Result</th><th scope="col">Baseline offset</th><th scope="col">Candidate offset</th><th scope="col">Evidence</th></tr></thead>
+            <tbody id="unity-diff-rows"></tbody>
+          </table>
+        </div>
+        <nav id="unity-diff-pages" class="pager" aria-label="Unity comparison pages" hidden>
+          <button id="unity-diff-prev" class="secondary">← Previous</button>
+          <span id="unity-diff-page"></span>
+          <button id="unity-diff-next" class="secondary">Next →</button>
+        </nav>
+        <section id="unity-diff-evidence" hidden aria-labelledby="unity-diff-evidence-title">
+          <h3 id="unity-diff-evidence-title"></h3>
+          <p id="unity-diff-evidence-note" class="help"></p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th scope="col">Field</th><th scope="col">Change</th><th scope="col">Baseline</th><th scope="col">Candidate</th></tr></thead>
+              <tbody id="unity-diff-field-rows"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </section>
     <section id="inventory" role="tabpanel" aria-labelledby="tab-inventory" hidden>
       <div class="table-tools">
@@ -314,6 +354,6 @@
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.11.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.12.0</span></footer>
 </body>
 </html>

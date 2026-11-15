@@ -7,8 +7,8 @@ const mobile = matchMedia('(max-width: 760px)');
 const setOrientation = () => document.querySelector('.tabs').setAttribute('aria-orientation', mobile.matches ? 'horizontal' : 'vertical');
 mobile.addEventListener('change', setOrientation);
 setOrientation();
-const tabs = { structure: 'structure', 'unity-fields': 'unity-fields', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', 'apk-set': 'apk-set', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.11.0', { type: 'module' });
+const tabs = { structure: 'structure', 'unity-fields': 'unity-fields', 'unity-diff': 'unity-diff', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', 'apk-set': 'apk-set', checks: 'checks', find: 'find', strings: 'strings' };
+const worker = new Worker('./worker.mjs?v=0.12.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
@@ -20,6 +20,8 @@ let inventoryPage = 0;
 let binaryDiff;
 let unityFields;
 let unityFieldsPage = 0;
+let unityDiff;
+let unityDiffPage = 0;
 let binaryPage = 0;
 let hexPage;
 let highlighted;
@@ -261,6 +263,14 @@ function show(data) {
   clearByteResult();
   unityFields = undefined;
   byId('tab-unity-fields').hidden = true;
+  byId('tab-unity-diff').hidden = !report.unitySerialized;
+  byId('unity-diff-candidate-name').textContent = '';
+  byId('unity-diff-member-label').hidden = true;
+  byId('unity-diff-member').replaceChildren();
+  byId('unity-diff-id').value = '';
+  byId('unity-diff-run').disabled = true;
+  byId('unity-diff-output').hidden = true;
+  unityDiff = undefined;
   byId('nested-option').hidden = report.format !== 'ZIP';
   byId('verify-content-option').hidden = report.format !== 'ZIP';
   byId('tab-apk-set').hidden = !data.apkSetAvailable;
@@ -374,6 +384,140 @@ byId('unity-textasset').addEventListener('click', () => perform('Preparing TextA
   const data = await call('unity-textasset', { index: unityFields.objectIndex });
   downloadBlob(data, unityFields.name || 'TextAsset-' + unityFields.pathId, '.bin');
 }));
+
+const unityDiffLabels = {
+  added: 'Added', removed: 'Removed', classChanged: 'Class changed', fieldsChanged: 'Fields changed',
+  fieldsEqual: 'Decoded fields match', bytesChanged: 'Bytes changed', metadataChanged: 'Type metadata changed',
+  moved: 'Moved · equal bytes', byteEqual: 'Equal bytes', unknown: 'Unresolved'
+};
+const unityDiffReasons = {
+  duplicatePathId: 'Duplicate Path ID', incompleteObjectTable: 'Incomplete object table',
+  pathNotIndexed: 'Path ID was not indexed', unknownClass: 'Unresolved class', invalidPayloadRange: 'Unreadable payload',
+  objectSizeLimit: 'Object exceeds 8 MiB', comparisonBudget: 'Comparison limit reached',
+  missingEmbeddedTypeTree: 'A supported embedded TypeTree is missing',
+  fieldDecodeFailed: 'Could not decode fields', fieldByteBudget: 'Field read limit reached'
+};
+const unityFieldKinds = {
+  added: 'Added', removed: 'Removed', layoutChanged: 'Type or length changed',
+  referenceChanged: 'Reference changed', dataChanged: 'Data changed', valueChanged: 'Value changed'
+};
+
+function renderUnityDiff() {
+  const query = byId('unity-diff-query').value.trim().toLowerCase();
+  const rows = unityDiff.rows.filter(row => [row.pathId, row.before?.className, row.after?.className,
+    unityDiffLabels[row.status], unityDiffReasons[row.reason]]
+    .some(value => value?.toLowerCase().includes(query)));
+  unityDiffPage = outputPage('unity-diff', unityDiffPage, rows.length);
+  const body = byId('unity-diff-rows');
+  if (!rows.length) {
+    emptyTable(body, 6, query ? 'No matching results.' : 'No changes or unresolved objects to display.');
+    return;
+  }
+  body.replaceChildren(...rows.slice(unityDiffPage * pageSize, (unityDiffPage + 1) * pageSize).map(row => {
+    const tr = node('tr');
+    const types = row.before && row.after && row.before.classId !== row.after.classId ?
+      row.before.className + ' → ' + row.after.className : row.before?.className ?? row.after?.className ?? '—';
+    for (const value of [row.pathId, types, unityDiffLabels[row.status], address(row.before?.offset), address(row.after?.offset)]) {
+      tr.append(node('td', value));
+    }
+    const evidence = node('td');
+    if (row.fieldDiff?.changes) {
+      evidence.append(actionButton(row.fieldDiff.changes + ' field changes', () => renderUnityEvidence(row)));
+    } else if (row.reason) evidence.textContent = unityDiffReasons[row.reason];
+    else if (row.bytes?.firstDifference != null) evidence.textContent = 'First differing byte at object +' + address(row.bytes.firstDifference);
+    else if (row.fieldDiff && !row.fieldDiff.complete) evidence.textContent = 'Partial field coverage';
+    tr.append(evidence);
+    return tr;
+  }));
+}
+
+function renderUnityEvidence(row) {
+  const diff = row.fieldDiff;
+  const section = byId('unity-diff-evidence');
+  const title = byId('unity-diff-evidence-title');
+  title.textContent = 'Path ID ' + row.pathId + ' · Field changes';
+  const notes = [
+    diff.complete ? 'Both field trees read in full.' : 'Partial field coverage.',
+    diff.unknownFields ? diff.unknownFields + ' fields unresolved.' : '',
+    diff.omitted ? diff.omitted + ' additional changes omitted.' : '',
+    ...diff.warnings.before.map(note => 'Baseline: ' + note),
+    ...diff.warnings.after.map(note => 'Candidate: ' + note)
+  ];
+  byId('unity-diff-evidence-note').textContent = notes.filter(Boolean).join(' ');
+  const body = byId('unity-diff-field-rows');
+  if (!diff.fields.length) emptyTable(body, 4, 'The field evidence limit was reached.');
+  else body.replaceChildren(...diff.fields.map(field => {
+    const tr = node('tr');
+    const label = field.path.join('.').replaceAll('.[', '[') || '(object root)';
+    tr.append(node('td', label + (field.occurrence ? ' [occurrence ' + (field.occurrence + 1) + ']' : '')),
+      node('td', unityFieldKinds[field.kind]));
+    for (const side of ['before', 'after']) {
+      const value = field[side];
+      const td = node('td');
+      if (!value) td.textContent = '—';
+      else {
+        const text = value.reference ? ((value.reference.path ?? 'File ID ' + value.reference.fileId) + ' · Path ID ' + value.reference.pathId) :
+          value.value != null ? String(value.value) + (value.preview ? '…' : '') :
+          value.itemCount != null ? value.itemCount + ' items' : value.type;
+        td.append(node('div', text || '""'), node('small', address(value.offset) + ' · ' + bytes(value.size)));
+        if (side === 'before' && value.size > 0) td.append(' ', actionButton('Hex', () => jumpTo(value.offset, value.size)));
+      }
+      tr.append(td);
+    }
+    return tr;
+  }));
+  section.hidden = false;
+  title.scrollIntoView({ block: 'nearest' });
+}
+
+const unityFile = byId('unity-diff-file');
+byId('unity-diff-choose').addEventListener('click', () => { if (!busy) unityFile.click(); });
+unityFile.addEventListener('change', () => {
+  const file = unityFile.files[0];
+  unityFile.value = '';
+  if (!file) return;
+  perform('Opening Unity candidate…', async () => {
+    const result = await call('unity-diff-candidate', { file });
+    byId('unity-diff-candidate-name').textContent = result.name;
+    byId('unity-diff-member-label').hidden = !result.members.length;
+    byId('unity-diff-member').replaceChildren(...result.members.map(member => {
+      const option = node('option', member.name + ' (' + bytes(member.size) + ')');
+      option.value = member.index;
+      return option;
+    }));
+    byId('unity-diff-run').disabled = false;
+    byId('unity-diff-output').hidden = true;
+  });
+});
+byId('unity-diff-form').addEventListener('submit', event => {
+  event.preventDefault();
+  perform('Comparing Unity objects…', async () => {
+    const result = await call('unity-diff', { index: Number(byId('unity-diff-member').value),
+      pathId: byId('unity-diff-id').value.trim() });
+    unityDiff = result;
+    unityDiffPage = 0;
+    byId('unity-diff-evidence').hidden = true;
+    byId('unity-diff-query').value = '';
+    const c = result.coverage;
+    byId('unity-diff-coverage').textContent =
+      result.baseline + ' → ' + (result.candidateContainer ? result.candidateContainer + ' › ' : '') + result.candidate +
+      ' · Object tables ' + c.beforeIndexed + '/' + c.beforeDeclared + ' and ' + c.afterIndexed + '/' + c.afterDeclared +
+      ' · ' + c.pairs + ' payload pairs checked · ' + c.fieldPairs + ' field comparisons (' +
+      c.partialFieldPairs + ' partial) · ' + result.counts.unknown + ' unresolved' +
+      (c.omittedRows ? ' · ' + c.omittedRows + ' object rows omitted' : '') +
+      (c.omittedFields ? ' · ' + c.omittedFields + ' field changes omitted' : '');
+    definitions(byId('unity-diff-counts'), Object.fromEntries(Object.entries(result.counts)
+      .filter(([, value]) => value > 0).map(([key, value]) => [unityDiffLabels[key], digits.format(value)])));
+    renderUnityDiff();
+    byId('unity-diff-output').hidden = false;
+  });
+});
+byId('unity-diff-query').addEventListener('input', () => { unityDiffPage = 0; renderUnityDiff(); });
+byId('unity-diff-prev').addEventListener('click', () => { unityDiffPage--; renderUnityDiff(); });
+byId('unity-diff-next').addEventListener('click', () => { unityDiffPage++; renderUnityDiff(); });
+byId('unity-diff-export').addEventListener('click', () => {
+  if (unityDiff) downloadJson(unityDiff, unityDiff.candidate, '.gameautopsy-unity-diff.json');
+});
 
 function renderInspector() {
   if (!hexPage) return;
