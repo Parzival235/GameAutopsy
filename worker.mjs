@@ -1,21 +1,23 @@
-import { preview } from './formats.mjs?v=0.9.0';
-import { compareArchives } from './compare.mjs?v=0.9.0';
-import { compareNestedArchives } from './nested-compare.mjs?v=0.9.0';
-import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.9.0';
-import { searchBytes } from './byte-search.mjs?v=0.9.0';
-import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.9.0';
-import { buildInventory } from './inventory.mjs?v=0.9.0';
-import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.9.0';
+import { preview } from './formats.mjs?v=0.10.0';
+import { compareArchives } from './compare.mjs?v=0.10.0';
+import { compareNestedArchives } from './nested-compare.mjs?v=0.10.0';
+import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.10.0';
+import { searchBytes } from './byte-search.mjs?v=0.10.0';
+import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.10.0';
+import { buildInventory } from './inventory.mjs?v=0.10.0';
+import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.10.0';
 import { interpretBytes } from './hex.mjs';
 import { canInspectApkSet, inspectApkSet } from './apk-set.mjs';
 import { createReportSession } from './report-session.mjs';
-import { createPayloadComparison } from './zip-content-diff.mjs?v=0.9.0';
-import { sampleStrings, scanStrings } from './string-scan.mjs?v=0.9.0';
-import { hashSha256 } from './sha256.mjs?v=0.9.0';
+import { createPayloadComparison } from './zip-content-diff.mjs?v=0.10.0';
+import { sampleStrings, scanStrings } from './string-scan.mjs?v=0.10.0';
+import { openZipEntryPair } from './zip-entry-pair.mjs?v=0.10.0';
+import { hashSha256 } from './sha256.mjs?v=0.10.0';
 
 const stack = [];
 let inventory;
 let bytePair;
+let archivePair;
 let session = createReportSession();
 let activeHash;
 
@@ -115,7 +117,17 @@ async function fullReport(progress) {
   };
 }
 
-async function run({ action, file, index, offset, query, mode, nested, abi, verifyPayloads, stringOptions }, progress, signal) {
+async function scanBytePair(node, pair, offset, progress, previewOffset) {
+  const result = await compareBytes(pair.before, pair.after, offset, progress);
+  bytePair = pair;
+  return session.record(node, 'byteDiff', {
+    ...result, schema: 'gameautopsy/byte-diff/1', before: pair.beforeName, after: pair.afterName, path: node.path,
+    ...(pair.source ? { source: pair.source } : {}),
+    ...(previewOffset != null ? { previewOffset } : {})
+  });
+}
+
+async function run({ action, file, index, offset, query, mode, nested, abi, verifyPayloads, stringOptions, scope, entryName, side }, progress, signal) {
   switch (action) {
     case 'open': {
       const node = await inspect(file, file.name, undefined, progress);
@@ -124,6 +136,7 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       stack.splice(0, stack.length, node);
       inventory = undefined;
       bytePair = undefined;
+      archivePair = undefined;
       session = createReportSession();
       return listing();
     }
@@ -131,16 +144,19 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       await appendMember(stack, index, progress);
       session.retainFile(current());
       bytePair = undefined;
+      archivePair = undefined;
       return listing();
     case 'ancestor':
       if (!Number.isInteger(index) || index < 0 || index >= stack.length) throw new Error('That parent is not open.');
       stack.splice(index + 1);
       bytePair = undefined;
+      archivePair = undefined;
       return listing();
     case 'parent':
       if (stack.length > 1) {
         stack.pop();
         bytePair = undefined;
+        archivePair = undefined;
       }
       return listing();
     case 'inventory':
@@ -155,6 +171,7 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       stack.splice(0, stack.length, ...next);
       for (const node of next) session.retainFile(node);
       bytePair = undefined;
+      archivePair = undefined;
       return listing();
     }
     case 'apk-set': {
@@ -174,24 +191,35 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       stack.splice(0, stack.length, ...next);
       session.retainFile(current());
       bytePair = undefined;
+      archivePair = undefined;
       return listing();
     }
     case 'full-report': return fullReport(progress);
     case 'diff-bytes': {
-      const left = current();
-      const candidate = file ?? bytePair?.after;
-      if (!candidate) throw new Error('Choose a candidate file first.');
-      const result = await compareBytes(left.blob, candidate, offset, progress);
-      bytePair = { before: left.blob, after: candidate };
-      return session.record(left, 'byteDiff', {
-        ...result, schema: 'gameautopsy/byte-diff/1', before: left.report.name, after: candidate.name, path: left.path
-      });
+      const node = current();
+      const pair = file ? { before: node.blob, after: file, beforeName: node.report.name, afterName: file.name } : bytePair;
+      if (!pair) throw new Error('Choose a candidate file first.');
+      return scanBytePair(node, pair, offset, progress);
+    }
+    case 'diff-entry': {
+      const node = current();
+      if (!archivePair || archivePair.before !== node) throw new Error('Compare two ZIP archives first.');
+      const group = archivePair.result.nested?.groups[scope - 1];
+      if (!Number.isInteger(scope) || scope < 0 || (scope && !group)) throw new Error('That archive scope is unavailable.');
+      if (typeof entryName !== 'string' || !entryName.length) throw new Error('Enter the exact entry path.');
+      const pair = await openZipEntryPair(node, archivePair.after, group?.path ?? [], entryName, progress);
+      const result = (group ?? archivePair.result).rows.find(row => row.name === entryName);
+      return scanBytePair(node, pair, 0, progress, result?.payload?.firstDifference);
     }
     case 'diff-preview': {
       if (!bytePair) throw new Error('Compare two files first.');
       const result = await previewDiff(bytePair.before, bytePair.after, offset);
-      return session.record(current(), 'byteDiffPreview', result, { candidate: bytePair.after.name });
+      return session.record(current(), 'byteDiffPreview', result,
+        { candidate: bytePair.afterName, ...(bytePair.source ? { source: bytePair.source } : {}) });
     }
+    case 'diff-entry-download':
+      if (!bytePair?.source || !['before', 'after'].includes(side)) throw new Error('Open a ZIP entry pair first.');
+      return bytePair[side];
     case 'compare': {
       const before = current();
       const after = await inspect(file, file.name, undefined, progress);
@@ -199,6 +227,8 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       const verify = verifyPayloads ? createPayloadComparison() : null;
       if (verify) result = compareArchives(before.report, after.report, await verify(before, after, progress));
       if (nested) result.nested = await compareNestedArchives(before, after, result, progress, verify);
+      archivePair = { before, after, result };
+      if (bytePair?.source) bytePair = undefined;
       return session.record(before, 'archiveComparison', result, { nested, verifyPayloads });
     }
     case 'checks': {

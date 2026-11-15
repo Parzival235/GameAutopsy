@@ -6,8 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Inspect game files directly on your device.">
   <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css?v=0.9.0">
-  <script type="module" src="./app.mjs?v=0.9.0"></script>
+  <link rel="stylesheet" href="./style.css?v=0.10.0">
+  <script type="module" src="./app.mjs?v=0.10.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -120,7 +120,13 @@
         <button id="byte-choose" class="secondary">Choose comparison file</button>
         <button id="byte-export" class="secondary" hidden>Download byte diff JSON ↓</button>
       </div>
+      <div id="byte-entry-tools" class="table-tools" hidden>
+        <button id="byte-back-comparison" class="secondary">← Archive comparison</button>
+        <button id="byte-save-baseline" class="secondary">Save baseline entry ↓</button>
+        <button id="byte-save-candidate" class="secondary">Save candidate entry ↓</button>
+      </div>
       <div id="byte-result" hidden>
+        <p id="byte-entry-path" hidden></p>
         <p id="byte-files" class="help"></p>
         <p id="byte-coverage" class="help" aria-live="polite"></p>
         <dl id="byte-stats" class="detail-grid"></dl>
@@ -131,8 +137,8 @@
           <button id="byte-more" type="button" class="secondary" hidden>Continue comparison</button>
         </form>
         <div id="byte-panels">
-          <div><h3>Current file</h3><pre id="byte-left"></pre></div>
-          <div><h3>Comparison file</h3><pre id="byte-right"></pre></div>
+          <div><h3 id="byte-left-title">Current file</h3><pre id="byte-left"></pre></div>
+          <div><h3 id="byte-right-title">Comparison file</h3><pre id="byte-right"></pre></div>
         </div>
         <div class="table-wrap">
           <table>
@@ -192,13 +198,17 @@
       <p id="comparison-path"></p>
       <dl id="comparison-stats"></dl>
       <p id="comparison-note"></p>
+      <form id="comparison-entry-form" class="table-tools">
+        <label>Exact entry path <input id="comparison-entry-path" type="text" placeholder="assets/example.dat" autocomplete="off" required></label>
+        <button class="secondary" type="submit">Diff entry by path</button>
+      </form>
       <details id="comparison-notices" hidden>
         <summary id="comparison-notices-title">Nested comparison coverage</summary>
         <ul id="comparison-notice-list"></ul>
       </details>
       <div class="table-wrap">
         <table>
-          <thead><tr><th scope="col">Path</th><th scope="col">Status</th><th scope="col">Payload evidence</th><th scope="col">Current packed</th><th scope="col">Candidate packed</th><th scope="col">Packed delta</th></tr></thead>
+          <thead><tr><th scope="col">Path</th><th scope="col">Status</th><th scope="col">Payload evidence</th><th scope="col">Current packed</th><th scope="col">Candidate packed</th><th scope="col">Packed delta</th><th scope="col">Action</th></tr></thead>
           <tbody id="comparison-rows"></tbody>
         </table>
       </div>
@@ -281,6 +291,6 @@
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.9.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.10.0</span></footer>
 </body>
 </html>

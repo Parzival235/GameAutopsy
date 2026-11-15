@@ -8,7 +8,7 @@ const setOrientation = () => document.querySelector('.tabs').setAttribute('aria-
 mobile.addEventListener('change', setOrientation);
 setOrientation();
 const tabs = { structure: 'structure', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', 'apk-set': 'apk-set', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.9.0', { type: 'module' });
+const worker = new Worker('./worker.mjs?v=0.10.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
@@ -252,9 +252,7 @@ function show(data) {
   byId('parent').hidden = path.length === 1;
   byId('compare').hidden = report.format !== 'ZIP';
   byId('tab-inventory').hidden = !data.inventoryAvailable;
-  binaryDiff = undefined;
-  byId('byte-result').hidden = true;
-  byId('byte-export').hidden = true;
+  clearByteResult();
   byId('nested-option').hidden = report.format !== 'ZIP';
   byId('verify-content-option').hidden = report.format !== 'ZIP';
   byId('tab-apk-set').hidden = !data.apkSetAvailable;
@@ -362,7 +360,7 @@ function renderComparison() {
     .some(value => value.toLowerCase().includes(query)));
   const skipped = coverage ? coverage.shared - coverage.attempted : 0;
   byId('comparison-note').textContent = coverage
-    ? coverage.attempted + ' of ' + coverage.shared + ' shared paths checked · ' + coverage.equal + ' byte-for-byte matches · ' +
+    ? coverage.attempted + ' of ' + coverage.shared + ' shared paths checked · ' + coverage.equal + ' equal byte for byte · ' +
       coverage.different + ' different · ' + coverage.failed + ' could not verify · ' + skipped + ' skipped' +
       (skipped ? ' (' + coverage.ambiguous + ' duplicate, ' + coverage.unavailable + ' unsupported or encrypted, ' +
         (coverage.sizeLimit + coverage.budgetLimit) + ' over limits).' : '.')
@@ -377,12 +375,15 @@ function renderComparison() {
     for (const value of [entry.name, comparisonLabels[entry.status], compareEvidence(entry.payload), packed(entry.before), packed(entry.after), delta]) {
       tr.append(node('td', value));
     }
+    const actions = node('td');
+    if (entry.canDiff) actions.append(actionButton('Diff bytes', () => compareEntry(index, entry.name)));
+    tr.append(actions);
     return tr;
   });
   if (!rows.length) {
     const tr = node('tr');
     const cell = node('td', visible.length ? 'No matching results.' : 'No differences to display.');
-    cell.colSpan = 6;
+    cell.colSpan = 7;
     tr.append(cell);
     rows.push(tr);
   }
@@ -394,10 +395,12 @@ function renderComparison() {
 }
 
 function showComparison(result) {
+  if (binaryDiff?.source) clearByteResult();
   comparison = result;
   comparison.path = current.path;
   comparisonPage = 0;
   byId('comparison-search').value = '';
+  byId('comparison-entry-path').value = '';
   byId('comparison-show-matches').checked = false;
   byId('comparison-path').textContent = result.baseline + ' → ' + result.candidate;
   const option = (title, value) => {
@@ -529,6 +532,10 @@ candidateInput.addEventListener('change', () => {
   if (file) perform('Comparing archives…', async () => showComparison(await call('compare', { file, nested, verifyPayloads })));
 });
 byId('comparison-scope').addEventListener('change', () => { comparisonPage = 0; renderComparison(); });
+byId('comparison-entry-form').addEventListener('submit', event => {
+  event.preventDefault();
+  compareEntry(Number(byId('comparison-scope').value), byId('comparison-entry-path').value);
+});
 byId('comparison-search').addEventListener('input', () => { comparisonPage = 0; renderComparison(); });
 byId('comparison-show-matches').addEventListener('change', () => { comparisonPage = 0; renderComparison(); });
 byId('comparison-prev').addEventListener('click', () => { comparisonPage--; renderComparison(); });
@@ -830,28 +837,64 @@ function renderBinaryRanges() {
   }));
 }
 
-function scanBinary(offset, file) {
-  return perform('Comparing bytes…', async () => {
-    const result = await call('diff-bytes', { offset, file });
-    binaryDiff = result;
-    binaryPage = 0;
-    byId('byte-files').textContent = result.before + ' (' + bytes(result.beforeSize) + ') ↔ ' +
-      result.after + ' (' + bytes(result.afterSize) + ')';
-    const coverage = '[' + address(result.start) + ', ' + address(result.end) + ') at the same offsets';
-    const equality = !result.totalRanges ?
-      (result.start === 0 && result.next === null ? 'Files identical byte for byte. ' : 'Scanned bytes match. ') : '';
-    byId('byte-coverage').textContent = equality + coverage +
-      (result.omittedRanges ? ' · ' + digits.format(result.omittedRanges) + ' additional ranges counted' : '');
-    definitions(byId('byte-stats'), {
-      Changed: bytes(result.changed), 'Current only': bytes(result.beforeOnly), 'Comparison only': bytes(result.afterOnly),
-      Ranges: digits.format(result.totalRanges)
-    });
-    byId('byte-more').hidden = result.next === null;
-    renderBinaryRanges();
-    await showBytePreview(result.ranges[0]?.offset ?? (result.end > result.start ? result.start : Math.max(0, result.start - 1)));
-    byId('byte-result').hidden = false;
-    byId('byte-export').hidden = false;
+function clearByteResult() {
+  binaryDiff = undefined;
+  for (const id of ['byte-result', 'byte-export', 'byte-entry-tools']) byId(id).hidden = true;
+}
+
+async function showByteResult(result) {
+  const { source } = result;
+  const previewOffset = result.previewOffset ?? result.ranges[0]?.offset ??
+    (result.end > result.start ? result.start : Math.max(0, result.start - 1));
+  await showBytePreview(previewOffset);
+  binaryDiff = result;
+  binaryPage = 0;
+  byId('byte-entry-tools').hidden = !source;
+  byId('byte-left-title').textContent = source ? 'Baseline entry' : 'Current file';
+  byId('byte-right-title').textContent = source ? 'Candidate entry' : 'Comparison file';
+  const entry = source ? [...source.archivePath, source.entry].join(' › ') : '';
+  byId('byte-entry-path').textContent = entry;
+  byId('byte-entry-path').hidden = !source;
+  const before = source?.baseline.archive ?? result.before;
+  const after = source?.candidate.archive ?? result.after;
+  byId('byte-files').textContent = before + ' (' + bytes(result.beforeSize) + ') ↔ ' +
+    after + ' (' + bytes(result.afterSize) + ')';
+  const coverage = '[' + address(result.start) + ', ' + address(result.end) + ') at the same offsets';
+  const equality = !result.totalRanges ?
+    (result.start === 0 && result.next === null ? 'Payloads identical byte for byte. ' : 'Scanned bytes match. ') : '';
+  byId('byte-coverage').textContent = equality + coverage +
+    (result.omittedRanges ? ' · ' + digits.format(result.omittedRanges) + ' additional ranges counted' : '');
+  definitions(byId('byte-stats'), {
+    Changed: bytes(result.changed), 'Current only': bytes(result.beforeOnly), 'Comparison only': bytes(result.afterOnly),
+    Ranges: digits.format(result.totalRanges)
   });
+  byId('byte-more').hidden = result.next === null;
+  renderBinaryRanges();
+  byId('byte-result').hidden = false;
+  byId('byte-export').hidden = false;
+}
+
+function scanBinary(offset, file) {
+  return perform('Comparing bytes…', async () => showByteResult(await call('diff-bytes', { offset, file })));
+}
+
+function compareEntry(scope, entryName) {
+  return perform('Opening both entries…', async () => {
+    await showByteResult(await call('diff-entry', { scope, entryName }));
+    setTab('binary', true);
+  });
+}
+
+byId('byte-back-comparison').addEventListener('click', () => setTab('compare', true));
+for (const [id, side, prefix] of [
+  ['byte-save-baseline', 'before', 'baseline-'], ['byte-save-candidate', 'after', 'candidate-']
+]) {
+  byId(id).addEventListener('click', () => perform('Preparing entry download…', async () => {
+    const source = binaryDiff?.source;
+    if (!source) return;
+    const data = await call('diff-entry-download', { side });
+    downloadBlob(data, prefix + (source.entry.split(/[\\/]/).at(-1) || 'entry'), '');
+  }));
 }
 const byteInput = byId('byte-candidate');
 byId('byte-choose').addEventListener('click', () => { if (!busy) byteInput.click(); });

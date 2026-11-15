@@ -16,9 +16,11 @@ function fingerprint(entry) {
   };
 }
 
+export const isCompleteZip = report => report.format === 'ZIP' &&
+  report.status === 'ok' && report.rows.length === report.details['Declared entries'];
+
 export function compareArchives(baseline, candidate, verification) {
-  if ([baseline, candidate].some(report => report.format !== 'ZIP' ||
-      report.status !== 'ok' || report.rows.length !== report.details['Declared entries'])) {
+  if (![baseline, candidate].every(isCompleteZip)) {
     throw new Error('Comparison requires two complete ZIP directories. Check archive warnings and limits.');
   }
   const before = entriesByName(baseline);
@@ -48,6 +50,7 @@ export function compareArchives(baseline, candidate, verification) {
     rows.push({
       name, status, before: left.map(fingerprint), after: right.map(fingerprint),
       ...(payload ? { metadataStatus, payload } : {}),
+      canDiff: left.length === 1 && right.length === 1 && Boolean(a?.open && b?.open),
       packedDelta: status === 'ambiguous' ? null : (b?.packed ?? 0) - (a?.packed ?? 0)
     });
   }

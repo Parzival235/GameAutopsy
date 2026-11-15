@@ -63,6 +63,14 @@ Enable **Verify entry bytes** before selecting the newer package to compare deco
 
 Nested traversal follows case-sensitive names to a maximum depth of three, up to 24 archive pairs, 20,000 nested result rows, and 256 MiB of declared packed plus unpacked input. Verification shares a separate 512-pair and 192 MiB input budget across scopes. It attempts up to 256 pairs per scope. Each packed or decoded payload must be at most 32 MiB. Stored and Deflate entries are supported. A match describes the bytes of a decoded entry. APK signature validity and installability require separate checks.
 
+## Compare and save individual entries
+
+In **Comparison**, click **Diff bytes** on a two-sided entry or enter its exact, case-sensitive name in **Exact entry path**. The lookup uses the selected **Archive scope**, including compared split APKs, and works for paths that were omitted from the change list because their metadata matched. The byte diff reads the decoded contents, highlights differences at matching offsets, and opens at the first differing range.
+
+**Save baseline entry** and **Save candidate entry** save the checked payload on each side. **Archive comparison** returns to the same scope and filtered table. The byte-diff export and full report record the package names, the nested archive path, and each entry's local header and data offsets relative to its immediate ZIP container.
+
+This on-demand comparison checks each local header, decoded size and CRC32. It supports Stored and Deflate entries up to 128 MiB packed and decoded per entry. Reopening the two paths has a combined 384 MiB input budget and at most 128 MiB of Deflate output, including intermediate archives. Duplicate names must be resolved outside this paired view.
+
 ## Find strings in binary files
 
 Open **Strings**, choose **UTF-8**, **UTF-16LE**, **UTF-16BE**, or **ASCII**, set a hexadecimal or decimal offset, and select **Scan strings**. UTF-16 code units are aligned from the chosen offset. The minimum length counts Unicode characters. Each row gives the byte offset and links to the matching span in **Hex**.

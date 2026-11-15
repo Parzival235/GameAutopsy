@@ -1,5 +1,5 @@
-import { bytesAt } from './formats.mjs?v=0.9.0';
-import { readApkSigningBlock } from './zip-checks.mjs?v=0.9.0';
+import { bytesAt } from './formats.mjs?v=0.10.0';
+import { readApkSigningBlock } from './zip-checks.mjs?v=0.10.0';
 
 const supported = new Set(['0x7109871A', '0xF05368C0', '0x1B93AD61']);
 
