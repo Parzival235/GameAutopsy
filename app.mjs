@@ -7,8 +7,8 @@ const mobile = matchMedia('(max-width: 760px)');
 const setOrientation = () => document.querySelector('.tabs').setAttribute('aria-orientation', mobile.matches ? 'horizontal' : 'vertical');
 mobile.addEventListener('change', setOrientation);
 setOrientation();
-const tabs = { structure: 'structure', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', 'apk-set': 'apk-set', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.10.0', { type: 'module' });
+const tabs = { structure: 'structure', 'unity-fields': 'unity-fields', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', 'apk-set': 'apk-set', checks: 'checks', find: 'find', strings: 'strings' };
+const worker = new Worker('./worker.mjs?v=0.11.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
@@ -18,6 +18,8 @@ let apkSet;
 let apkNotesPage = 0;
 let inventoryPage = 0;
 let binaryDiff;
+let unityFields;
+let unityFieldsPage = 0;
 let binaryPage = 0;
 let hexPage;
 let highlighted;
@@ -184,6 +186,10 @@ function renderRows() {
         jumpTo(entry.offset, entry.packed == null ? entry.size : Math.min(entry.directoryOffset - entry.offset, 30))
       ));
     }
+    if (entry.kind === 'Unity object' && entry.offset != null && entry.size &&
+        current.report.unitySerialized?.typeTrees?.[entry.typeIndex]) {
+      actions.append(actionButton('Fields', () => showUnityFields(index)));
+    }
     if (entry.recordOffset != null) {
       actions.append(actionButton('Record', () => jumpTo(entry.recordOffset, entry.recordSize)));
     }
@@ -253,6 +259,8 @@ function show(data) {
   byId('compare').hidden = report.format !== 'ZIP';
   byId('tab-inventory').hidden = !data.inventoryAvailable;
   clearByteResult();
+  unityFields = undefined;
+  byId('tab-unity-fields').hidden = true;
   byId('nested-option').hidden = report.format !== 'ZIP';
   byId('verify-content-option').hidden = report.format !== 'ZIP';
   byId('tab-apk-set').hidden = !data.apkSetAvailable;
@@ -298,6 +306,74 @@ function show(data) {
   byId('workspace').hidden = false;
   byId('file-prompt').textContent = 'Open another file';
 }
+
+function renderUnityFields() {
+  if (!unityFields) return;
+  const query = byId('unity-fields-search').value.trim().toLowerCase();
+  const rows = unityFields.rows;
+  const paths = [];
+  const fieldPath = row => paths[row.id] ??= row.parent == null || rows[row.parent]?.parent == null
+    ? row.name : fieldPath(rows[row.parent]) + (row.name.startsWith('[') ? '' : '.') + row.name;
+  const matches = rows.filter(row => !query || [fieldPath(row), row.type, row.value, row.reference?.pathId, row.reference?.externalPath]
+    .some(value => value != null && String(value).toLowerCase().includes(query)));
+  unityFieldsPage = outputPage('unity-fields', unityFieldsPage, matches.length);
+  const body = byId('unity-fields-rows');
+  if (!matches.length) {
+    emptyTable(body, 6, 'No matching fields.');
+    return;
+  }
+  body.replaceChildren(...matches.slice(unityFieldsPage * pageSize, (unityFieldsPage + 1) * pageSize).map(row => {
+    const tr = node('tr');
+    const value = row.opaque ? 'Raw bytes' : row.reference ?
+      (row.reference.pathId === '0' ? 'Null reference' : 'Path ID ' + row.reference.pathId +
+        (row.reference.externalPath ? ' · ' + row.reference.externalPath : ' · File ID ' + row.reference.fileId)) :
+      row.value == null && row.itemCount != null ? row.itemCount + ' items' :
+      row.value === '' && !row.preview ? '""' : String(row.value ?? '—') + (row.preview ? '…' : '');
+    for (const text of [fieldPath(row), row.type, value, address(row.offset), bytes(row.size)]) tr.append(node('td', text));
+    const actions = node('td');
+    if (row.size > 0) actions.append(actionButton('Hex', () => jumpTo(row.offset, row.size)));
+    const target = row.reference?.target;
+    if (target?.fields) actions.append(actionButton('Follow object', () => showUnityFields(target.index)));
+    else if (target?.offset != null && target.size > 0) {
+      actions.append(actionButton('Target hex', () => jumpTo(target.offset, target.size)));
+    }
+    tr.append(actions);
+    return tr;
+  }));
+}
+
+function showUnityFields(index) {
+  return perform('Decoding Unity fields…', async () => {
+    const result = await call('unity-fields', { index });
+    unityFields = result;
+    unityFieldsPage = 0;
+    byId('unity-fields-search').value = '';
+    byId('unity-fields-object').textContent = result.className +
+      (result.name ? ' · ' + result.name : '') + ' · Path ID ' + result.pathId;
+    byId('unity-fields-coverage').textContent = (result.status === 'partial' ? 'Partial · ' : '') +
+      digits.format(result.rows.length) + ' field rows · ' + bytes(result.bytesAccountedFor) +
+      ' of ' + bytes(result.objectSize) + ' accounted for';
+    byId('unity-fields-warnings').replaceChildren(...result.warnings.map(warning => node('li', warning)));
+    byId('unity-fields-warnings').hidden = !result.warnings.length;
+    byId('unity-textasset').hidden = !result.textAsset;
+    byId('tab-unity-fields').hidden = false;
+    renderUnityFields();
+    setTab('unity-fields', true);
+  });
+}
+
+byId('unity-fields-back').addEventListener('click', () => setTab('structure', true));
+byId('unity-fields-search').addEventListener('input', () => { unityFieldsPage = 0; renderUnityFields(); });
+byId('unity-fields-prev').addEventListener('click', () => { unityFieldsPage--; renderUnityFields(); });
+byId('unity-fields-next').addEventListener('click', () => { unityFieldsPage++; renderUnityFields(); });
+byId('unity-fields-export').addEventListener('click', () => {
+  if (unityFields) downloadJson(unityFields, unityFields.className + '-' + unityFields.pathId, '.gameautopsy-unity-fields.json');
+});
+byId('unity-textasset').addEventListener('click', () => perform('Preparing TextAsset download…', async () => {
+  if (!unityFields?.textAsset) return;
+  const data = await call('unity-textasset', { index: unityFields.objectIndex });
+  downloadBlob(data, unityFields.name || 'TextAsset-' + unityFields.pathId, '.bin');
+}));
 
 function renderInspector() {
   if (!hexPage) return;

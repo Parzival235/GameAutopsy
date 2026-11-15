@@ -17,7 +17,7 @@ GameAutopsy is a read-only game-file inspector that runs in your browser. Open t
 | ELF 32/64 | Architecture, byte order, entry address, segment permissions, sections, file offsets and 16 KiB LOAD alignment checks. |
 | PE32 / PE32+ | Architecture, entry RVA, image base, sections and data directories. |
 | UnityFS 6–8 | Header, block table and file directory. Open members from Raw, LZMA, LZ4 and LZ4HC blocks. |
-| Unity serialized files 17–26 | Object table with exact 64-bit Path IDs, class IDs, type hashes, metadata records, payload ranges and external file references. |
+| Unity serialized files 17–26 | Object table with exact 64-bit Path IDs, class IDs, type hashes, metadata records, payload ranges and external file references. Decode fields from embedded TypeTrees in versions 17–23. |
 | Android binary XML | UTF-8 and UTF-16LE pools, XML elements, attributes and typed values with exact record offsets. Manifest summary covers package, split, version, SDK levels and declared permissions. |
 | Godot PCK v0–v4 | Standalone pack directories, paths, declared MD5, payload ranges and entry flags. Open or save ordinary unencrypted files. |
 | IL2CPP metadata | Signature and selected header fields. |
@@ -37,9 +37,12 @@ While the tool is busy, the activity strip shows the current stage. When known, 
 
 1. Open a Unity serialized file such as `sharedassets0.assets`, or open a serialized member (often `CAB-…`) from a UnityFS bundle.
 2. In **Structure**, filter by a class name such as `Texture2D` or `MonoBehaviour`, an exact Path ID, or an external file path. Expand **Format and source details** for the engine version, byte order, class counts, and coverage.
-3. Use **Record** to inspect the object table entry, **Hex** to jump to its payload in the serialized file, or **Open → Save open entry** to save that object's raw serialized bytes. **Export full JSON** includes the indexed object and external reference records for opened files, subject to the report retention limits.
+3. Use **Fields** on a supported object to inspect strings, numbers, arrays, nested fields and references. Filter by field path, type or value, or use **Hex** on a field to highlight its bytes in the serialized file. **Follow object** opens the fields of a uniquely indexed local reference.
+4. Use **Save TextAsset bytes** to extract a TextAsset's declared `m_Script` payload as a binary file. Choose **Open → Save open entry** for the raw serialized object. **Export full JSON** includes the fields already inspected, subject to the report retention limits.
 
-External reference rows report the declared path, GUID bytes, and one-based File ID. A reference can point outside the current bundle. Raw object bytes can also refer to streamed texture or audio data in separate resource files. Type trees are located and skipped to index the object table. The inspector does not deserialize object fields or convert textures, audio, and meshes.
+External reference rows report the declared path, GUID bytes and one-based File ID. Field offsets refer to the serialized file. For a UnityFS member, they are relative to the decoded member. **Record** still highlights the object's metadata record.
+
+Field decoding uses inline TypeTrees in serialized files 17–23. Objects with stripped or externally stored trees, managed references, newer tree layouts, and texture, audio or mesh conversion are outside this decoder's coverage. Managed-reference fields can stop decoding after an earlier usable prefix. Limits are 1 MiB of tree data, 12,000 tree nodes, 48 levels, 5,000 output rows and an 8 MiB payload read. Known byte ranges can still be recorded and saved without loading the entire payload.
 
 ## Search an entire package
 
@@ -133,7 +136,7 @@ node --test tests/*.test.mjs
 | [Apktool issue 2990](https://github.com/iBotPeaches/Apktool/issues/2990) and [AOSP AXML structures](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/libs/androidfw/include/androidfw/ResourceTypes.h) | Retain resource IDs and typed data when attribute names or resource labels are unavailable. |
 | [Android zipalign](https://developer.android.com/tools/zipalign) and [APK Signature Scheme v2](https://source.android.com/docs/security/features/apksigning/v2) | Check actual payload offsets and report signing-block IDs with their positions. |
 
-The vendored [lzma-purejs decoder](vendor/lzma/LICENSE) runs offline. SHA-256 uses the [FIPS 180-4](https://csrc.nist.gov/pubs/fips/180-4/upd1/final) block and padding rules.
+The [Unity common-string table](vendor/unity-common-strings/LICENSE) is adapted from AssetStudio under MIT. The vendored [lzma-purejs decoder](vendor/lzma/LICENSE) runs offline. SHA-256 uses the [FIPS 180-4](https://csrc.nist.gov/pubs/fips/180-4/upd1/final) block and padding rules.
 
 Format references include [ZIP](https://support.pkware.com/pkzip/appnote), [DEX](https://source.android.com/docs/core/runtime/dex-format), [ELF](https://gabi.xinuos.com/elf/), [PE](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format), [UnityFS](https://reverseengineering.wiki/index.php/Format:Unity_asset_bundle_(UnityFS)), and [LZ4](https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md).
 

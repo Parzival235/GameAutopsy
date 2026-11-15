@@ -6,8 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Inspect game files directly on your device.">
   <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css?v=0.10.0">
-  <script type="module" src="./app.mjs?v=0.10.0"></script>
+  <link rel="stylesheet" href="./style.css?v=0.11.0">
+  <script type="module" src="./app.mjs?v=0.11.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -65,6 +65,7 @@
     <div class="workspace-body">
     <div class="tabs" role="tablist" aria-label="Analysis views">
       <button id="tab-structure" aria-selected="true" aria-controls="structure" role="tab">Structure</button>
+      <button id="tab-unity-fields" aria-selected="false" aria-controls="unity-fields" role="tab" tabindex="-1" hidden>Unity fields</button>
       <button id="tab-inventory" aria-selected="false" aria-controls="inventory" role="tab" tabindex="-1" hidden>Inventory</button>
       <button id="tab-binary" aria-selected="false" aria-controls="binary" role="tab" tabindex="-1">Byte diff</button>
       <button id="tab-hex" aria-selected="false" aria-controls="hex" role="tab" tabindex="-1">Hex</button>
@@ -90,6 +91,28 @@
         <button id="prev" class="secondary">← Previous</button>
         <span id="page"></span>
         <button id="next" class="secondary">Next →</button>
+      </nav>
+    </section>
+    <section id="unity-fields" role="tabpanel" aria-labelledby="tab-unity-fields" hidden>
+      <div class="table-tools">
+        <button id="unity-fields-back" class="secondary">← Structure</button>
+        <button id="unity-fields-export" class="secondary">Download fields JSON ↓</button>
+        <button id="unity-textasset" class="secondary" hidden>Save TextAsset bytes ↓</button>
+        <label>Find field <input id="unity-fields-search" type="search" placeholder="Name, type or value" autocomplete="off"></label>
+      </div>
+      <h3 id="unity-fields-object"></h3>
+      <p id="unity-fields-coverage" class="help" aria-live="polite"></p>
+      <ul id="unity-fields-warnings" hidden></ul>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Field</th><th scope="col">Type</th><th scope="col">Value</th><th scope="col">Offset</th><th scope="col">Size</th><th scope="col">Action</th></tr></thead>
+          <tbody id="unity-fields-rows"></tbody>
+        </table>
+      </div>
+      <nav id="unity-fields-pages" class="pager" aria-label="Unity fields pages" hidden>
+        <button id="unity-fields-prev" class="secondary">← Previous</button>
+        <span id="unity-fields-page"></span>
+        <button id="unity-fields-next" class="secondary">Next →</button>
       </nav>
     </section>
     <section id="inventory" role="tabpanel" aria-labelledby="tab-inventory" hidden>
@@ -291,6 +314,6 @@
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.10.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.11.0</span></footer>
 </body>
 </html>

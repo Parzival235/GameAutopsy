@@ -87,18 +87,23 @@ function readType(reader, version, typeTrees, reference) {
   const scriptId = hasScriptId ? reader.hex(16) : null;
   const typeHash = reader.hex(16);
   let inlineTypeTree = null;
+  let typeTree;
   if (typeTrees) {
     if (version >= 23) {
       reader.skip(16);
       const size = reader.u32();
+      const offset = reader.offset();
       reader.skip(size);
       inlineTypeTree = size > 0;
+      if (size && version === 23) typeTree = { offset, size };
     } else {
+      const offset = reader.offset();
       const nodeSize = version >= 19 ? 32 : 24;
       const nodes = reader.count('type tree node', nodeSize);
       const strings = reader.count('type tree string byte', 1);
       reader.skip(nodes * nodeSize + strings);
       inlineTypeTree = true;
+      typeTree = { offset, size: reader.offset() - offset };
     }
     if (version >= 21) {
       if (reference) {
@@ -110,7 +115,7 @@ function readType(reader, version, typeTrees, reference) {
       }
     }
   }
-  return { classId, stripped, scriptIndex, scriptId, typeHash, inlineTypeTree };
+  return { classId, stripped, scriptIndex, scriptId, typeHash, inlineTypeTree, typeTree };
 }
 
 export async function inspectSerializedFile(blob, out, head, progress) {
@@ -151,7 +156,13 @@ export async function inspectSerializedFile(blob, out, head, progress) {
   }
   const objectCount = reader.count('object', version >= 22 ? 24 : 20);
   out.details['Declared objects'] = objectCount;
-  const info = { engineVersion, objectCount, objectsIndexed: 0, classes: [], externalCount: null, externals: [] };
+  const info = {
+    engineVersion, version, littleEndian: little, objectCount, objectsIndexed: 0, classes: [],
+    externalCount: null, externals: [], typeTrees: {}
+  };
+  for (const [index, type] of types.entries()) {
+    if (type.typeTree) info.typeTrees[index] = type.typeTree;
+  }
   out.unitySerialized = info;
   const counts = new Map();
   const pathIds = new Set();

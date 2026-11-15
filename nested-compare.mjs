@@ -1,6 +1,6 @@
-import { analyze, MiB, openZipMember } from './formats.mjs?v=0.10.0';
-import { compareArchives, entriesByName } from './compare.mjs?v=0.10.0';
-import { archivePriority, nestedZipName } from './zip-content-diff.mjs?v=0.10.0';
+import { analyze, MiB, openZipMember } from './formats.mjs?v=0.11.0';
+import { compareArchives, entriesByName } from './compare.mjs?v=0.11.0';
+import { archivePriority, nestedZipName } from './zip-content-diff.mjs?v=0.11.0';
 
 const maxDepth = 3;
 const maxPairs = 24;

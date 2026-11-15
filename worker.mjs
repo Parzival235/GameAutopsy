@@ -1,18 +1,19 @@
-import { preview } from './formats.mjs?v=0.10.0';
-import { compareArchives } from './compare.mjs?v=0.10.0';
-import { compareNestedArchives } from './nested-compare.mjs?v=0.10.0';
-import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.10.0';
-import { searchBytes } from './byte-search.mjs?v=0.10.0';
-import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.10.0';
-import { buildInventory } from './inventory.mjs?v=0.10.0';
-import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.10.0';
+import { preview } from './formats.mjs?v=0.11.0';
+import { compareArchives } from './compare.mjs?v=0.11.0';
+import { compareNestedArchives } from './nested-compare.mjs?v=0.11.0';
+import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.11.0';
+import { searchBytes } from './byte-search.mjs?v=0.11.0';
+import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.11.0';
+import { buildInventory } from './inventory.mjs?v=0.11.0';
+import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.11.0';
 import { interpretBytes } from './hex.mjs';
 import { canInspectApkSet, inspectApkSet } from './apk-set.mjs';
 import { createReportSession } from './report-session.mjs';
-import { createPayloadComparison } from './zip-content-diff.mjs?v=0.10.0';
-import { sampleStrings, scanStrings } from './string-scan.mjs?v=0.10.0';
-import { openZipEntryPair } from './zip-entry-pair.mjs?v=0.10.0';
-import { hashSha256 } from './sha256.mjs?v=0.10.0';
+import { createPayloadComparison } from './zip-content-diff.mjs?v=0.11.0';
+import { sampleStrings, scanStrings } from './string-scan.mjs?v=0.11.0';
+import { openZipEntryPair } from './zip-entry-pair.mjs?v=0.11.0';
+import { inspectUnityFields } from './unity-fields.mjs?v=0.11.0';
+import { hashSha256 } from './sha256.mjs?v=0.11.0';
 
 const stack = [];
 let inventory;
@@ -195,6 +196,18 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       return listing();
     }
     case 'full-report': return fullReport(progress);
+    case 'unity-fields': {
+      const node = current();
+      const result = await inspectUnityFields(node.blob, node.report, index, progress);
+      node.unityFields = result;
+      return session.record(node, 'unityFields', result, { objectIndex: index, pathId: result.pathId });
+    }
+    case 'unity-textasset': {
+      const node = current();
+      const range = node.unityFields?.textAsset;
+      if (!range || node.unityFields.objectIndex !== index) throw new Error('Inspect a TextAsset first.');
+      return node.blob.slice(range.offset, range.offset + range.size);
+    }
     case 'diff-bytes': {
       const node = current();
       const pair = file ? { before: node.blob, after: file, beforeName: node.report.name, afterName: file.name } : bytePair;

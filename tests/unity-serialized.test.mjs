@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { inspect, openMember } from '../archive-members.mjs';
 import { analyze } from '../formats.mjs';
+import { inspectUnityFields } from '../unity-fields.mjs';
 import { decodeUnityLzma } from '../unity-lzma.mjs';
 
 const pathId = -9223372036854770000n;
 
 function serialized({
   version = 22, endian = 'LE', payloadOffset = 0, typeIndex = 0, duplicate = false, typeTrees = true,
-  extracted = false, engine = '6000.0.65f1'
+  extracted = false, engine = '6000.0.65f1', classId = 114, embedded, payload = Buffer.from('ABCD')
 } = {}) {
   const extended = version >= 22;
   const header = Buffer.alloc(extended ? 48 : 20);
@@ -22,12 +23,19 @@ function serialized({
   integer('writeInt32', 13); // Android
   byte(Number(typeTrees));
   integer('writeInt32', 1); // one serialized type
-  integer('writeInt32', 114);
+  integer('writeInt32', classId);
   byte(0); // stripped
   integer('writeInt16', 0);
-  position += 32; // script ID and type hash
+  position += classId === 114 || version >= 19 ? 32 : 16; // script index is 0
   if (typeTrees) {
-    if (version >= 23) {
+    if (embedded) {
+      if (version >= 23) {
+        position += 16;
+        integer('writeUInt32', embedded.length);
+      }
+      embedded.copy(metadata, position);
+      position += embedded.length;
+    } else if (version >= 23) {
       position += 16; // content hash
       integer('writeUInt32', extracted ? 0 : 16);
       if (!extracted) position += 16; // length-delimited inline tree
@@ -46,7 +54,7 @@ function serialized({
     integer('writeBigInt64', pathId);
     if (extended) integer('writeBigInt64', BigInt(payloadOffset));
     else integer('writeUInt32', payloadOffset);
-    integer('writeUInt32', 4);
+    integer('writeUInt32', payload.length);
     integer('writeInt32', typeIndex);
   }
   integer('writeInt32', 2); // local script references
@@ -65,7 +73,6 @@ function serialized({
   if (version >= 26) integer('writeInt32', 0); // shared subtrees
   string('');
   const dataOffset = (header.length + position + 15) & ~15;
-  const payload = Buffer.from([0x41, 0x42, 0x43, 0x44]);
   const size = dataOffset + payload.length;
   header.writeUInt32BE(version, 8);
   header[16] = Number(endian === 'BE');
@@ -144,4 +151,88 @@ test('UnityFS decodes LZMA directories and members with bounded input and output
   assert.throws(() => decodeUnityLzma(block.subarray(0, -12), 950), /truncated|invalid match/);
   assert.throws(() => decodeUnityLzma(block, 949), /declared size|invalid match/);
   assert.throws(() => decodeUnityLzma(block, 32 * 1024 * 1024 + 1), /block limit/);
+});
+
+function embeddedTree(nodes, version, endian) {
+  const width = version >= 19 ? 32 : 24;
+  const prefix = version === 23 ? 8 : 0;
+  const head = Buffer.alloc(prefix + 8);
+  if (prefix) {
+    head['writeUInt32' + endian](0x7474686d);
+    head['writeUInt32' + endian](23, 4);
+  }
+  const table = Buffer.alloc(width * nodes.length);
+  const strings = [];
+  let stringBytes = 0;
+  const index = label => {
+    if (typeof label === 'number') return (0x80000000 | label) >>> 0;
+    const bytes = Buffer.from(label + '\0');
+    const start = stringBytes;
+    stringBytes += bytes.length;
+    strings.push(bytes);
+    return start;
+  };
+  nodes.forEach(([level, type, label, size, flags = 0], i) => {
+    const at = i * width;
+    table[at + 2] = level;
+    table['writeUInt32' + endian](index(type), at + 4);
+    table['writeUInt32' + endian](index(label), at + 8);
+    table['writeInt32' + endian](size, at + 12);
+    table['writeUInt32' + endian](flags, at + 20);
+  });
+  head['writeInt32' + endian](nodes.length, prefix);
+  head['writeInt32' + endian](stringBytes, prefix + 4);
+  return Buffer.concat([head, table, ...strings]);
+}
+
+test('embedded Unity trees decode fields and expose exact TextAsset bytes in both byte orders', async () => {
+  const schema = [
+    [0, 847, 55, -1], [1, 840, 427, -1], [1, 840, 490, -1],
+    [1, 981, 'values', -1], [2, 49, 49, -1], [3, 222, 795, 4],
+    [3, 789, 106, 2, 0x4000], [1, 633, 'link', 12],
+    [2, 222, 'm_FileID', 4], [2, 814, 'm_PathID', 8]
+  ];
+  for (const [version, endian] of [[17, 'BE'], [22, 'LE'], [23, 'LE']]) {
+    const payload = Buffer.alloc(36);
+    payload['writeInt32' + endian](4);
+    payload.write('demo', 4);
+    payload['writeInt32' + endian](3, 8);
+    payload.set([0x41, 0, 0xff], 12);
+    payload['writeInt32' + endian](2, 16);
+    payload['writeInt16' + endian](71, 20);
+    payload['writeInt16' + endian](-2, 22);
+    payload['writeInt32' + endian](0, 24);
+    payload['writeBigInt64' + endian](pathId, 28);
+    const blob = serialized({ version, endian, classId: 49, payload, embedded: embeddedTree(schema, version, endian) });
+    const report = await analyze(blob, 'text.assets');
+    const index = report.rows.findIndex(row => row.kind === 'Unity object');
+    const result = await inspectUnityFields(blob, report, index);
+    assert.equal(result.status, 'complete', result.warnings);
+    assert.equal(result.name, 'demo');
+    const { offset, size } = result.textAsset;
+    assert.equal(offset, report.rows[index].offset + 12);
+    assert.deepEqual(new Uint8Array(await blob.slice(offset, offset + size).arrayBuffer()), Uint8Array.of(0x41, 0, 0xff));
+    assert.deepEqual(result.rows.filter(row => row.name.startsWith('[')).map(row => row.value), [71, -2]);
+    const link = result.rows.find(row => row.name === 'link');
+    assert.equal(link.reference.pathId, String(pathId));
+    assert.equal(link.reference.target.index, index);
+  }
+});
+
+test('embedded field decoding retains a valid prefix when a length exceeds the object', async () => {
+  const schema = [[0, 847, 55, -1], [1, 222, 'first', 4], [1, 840, 490, -1]];
+  const payload = Buffer.alloc(8);
+  payload.writeInt32LE(73);
+  payload.writeInt32LE(300, 4);
+  const blob = serialized({ classId: 49, payload, embedded: embeddedTree(schema, 22, 'LE') });
+  const report = await analyze(blob, 'invalid.assets');
+  const index = report.rows.findIndex(row => row.kind === 'Unity object');
+  const result = await inspectUnityFields(blob, report, index);
+  assert.equal(result.status, 'partial');
+  assert.match(result.warnings[0], /past the Unity object payload/);
+  assert.equal(result.rows.find(row => row.name === 'first').value, 73);
+  assert.equal(result.textAsset, undefined);
+  const externalBlob = serialized({ version: 23, extracted: true });
+  const external = await analyze(externalBlob, 'external.assets');
+  await assert.rejects(inspectUnityFields(externalBlob, external, index), /no supported embedded TypeTree/);
 });

@@ -1,12 +1,12 @@
 import { inspectPck } from './pck.mjs';
-import { inspectAxml } from './axml.mjs?v=0.10.0';
-import { inspectSerializedFile, looksLikeSerializedFile } from './unity-serialized.mjs?v=0.10.0';
+import { inspectAxml } from './axml.mjs?v=0.11.0';
+import { inspectSerializedFile, looksLikeSerializedFile } from './unity-serialized.mjs?v=0.11.0';
 
-import { decodeUnityLzma, maxLzmaBlock } from './unity-lzma.mjs?v=0.10.0';
+import { decodeUnityLzma, maxLzmaBlock } from './unity-lzma.mjs?v=0.11.0';
 
-export { sampleStrings } from './string-scan.mjs?v=0.10.0';
+export { sampleStrings } from './string-scan.mjs?v=0.11.0';
 
-export const version = '0.10.0';
+export const version = '0.11.0';
 export const MiB = 1024 * 1024;
 const maxRows = 20000;
 const maxDirectory = 24 * MiB;
