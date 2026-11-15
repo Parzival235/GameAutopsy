@@ -1,5 +1,5 @@
-import { MiB } from './formats.mjs?v=0.5.0';
-import { archiveFormat, maxMember, openMember } from './archive-members.mjs';
+import { MiB } from './formats.mjs?v=0.6.0';
+import { archiveFormat, maxMember, openMember } from './archive-members.mjs?v=0.6.0';
 
 const maxDepth = 4;
 const maxContainers = 48;
@@ -69,7 +69,8 @@ export async function buildInventory(root, onProgress = () => {}) {
       }
       result.attempted++;
       result.bytesBudgeted += cost;
-      onProgress({ containers: result.containers, entries: result.rows.length });
+      onProgress({ stage: 'Indexing nested archives', detail: result.rows.length + ' entries indexed · ' +
+        result.containers + ' containers found' });
       let child;
       try {
         child = await openMember(parent, row);
@@ -87,5 +88,6 @@ export async function buildInventory(root, onProgress = () => {}) {
     }
   }
   await walk(root, [root.report.name], []);
+  onProgress({ stage: 'Inventory ready', detail: result.rows.length + ' entries indexed · ' + result.containers + ' containers found' });
   return result;
 }

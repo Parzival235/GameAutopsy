@@ -20,7 +20,7 @@ function parsePattern(query, mode) {
   return pattern;
 }
 
-export async function searchBytes(blob, query, mode, from = 0) {
+export async function searchBytes(blob, query, mode, from = 0, progress = () => {}) {
   const pattern = parsePattern(query, mode);
   if (!Number.isSafeInteger(from) || from < 0 || from > blob.size) throw new Error('Search offset is outside the file.');
   const fixed = pattern.flatMap((value, index) => value === null ? [] : [[index, value]]);
@@ -28,8 +28,13 @@ export async function searchBytes(blob, query, mode, from = 0) {
   const end = Math.min(Math.max(from, blob.size - pattern.length + 1), from + scanLimit);
   const offsets = [];
   let probes = 0;
-  const result = end => ({ from, end, length: pattern.length, offsets, next: end < blob.size - pattern.length + 1 ? end : null });
+  const update = done => progress({ stage: 'Searching byte offsets', done, total: end - from, unit: 'offsets' });
+  const result = stop => {
+    update(stop - from);
+    return { from, end: stop, length: pattern.length, offsets, next: stop < blob.size - pattern.length + 1 ? stop : null };
+  };
   for (let at = from; at < end; at += chunkSize) {
+    if ((at - from) % (4 * MiB) === 0) update(at - from);
     const count = Math.min(chunkSize, end - at);
     const data = new Uint8Array(await blob.slice(at, at + count + pattern.length - 1).arrayBuffer());
     for (let i = data.indexOf(value, anchor); i >= 0 && i - anchor < count; i = data.indexOf(value, i + 1)) {

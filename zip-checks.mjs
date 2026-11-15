@@ -1,4 +1,4 @@
-import { bytesAt, MiB, openZipMember, zipLocalInfo } from './formats.mjs?v=0.5.0';
+import { bytesAt, MiB, openZipMember, zipLocalInfo } from './formats.mjs?v=0.6.0';
 
 const labels = new Map([[0x7109871a, 'APK v2'], [0xf05368c0, 'APK v3'], [0x1b93ad61, 'APK v3.1']]);
 const hex = n => '0x' + n.toString(16).toUpperCase();
@@ -31,7 +31,7 @@ async function signingBlock(blob, directory) {
   return { offset: start, size: Number(size) + 8, pairs };
 }
 
-export async function checkZip(blob, report) {
+export async function checkZip(blob, report, progress = () => {}) {
   const directory = Number(report.details['Central directory']);
   if (report.format !== 'ZIP' || !Number.isSafeInteger(directory)) throw new Error('Open a ZIP with a readable central directory first.');
   const checks = [];
@@ -51,7 +51,10 @@ export async function checkZip(blob, report) {
   let native = 0;
   let skipped = 0;
   const ranges = [];
-  for (const entry of report.rows) {
+  const total = report.rows.length;
+  const update = done => progress({ stage: 'Checking ZIP layout', done, total, unit: 'entries' });
+  for (const [index, entry] of report.rows.entries()) {
+    if (index % 32 === 0) update(index);
     if (names.has(entry.name)) add('Warning', entry.name, 'Duplicate path.', entry.central);
     names.add(entry.name);
     if (entry.flags & 0x2041) {
@@ -73,6 +76,7 @@ export async function checkZip(blob, report) {
       add('Error', entry.name, error.message, entry.offset);
     }
   }
+  update(total);
   ranges.sort((a, b) => a.start - b.start);
   let previous;
   for (const range of ranges) {
@@ -90,14 +94,19 @@ export async function checkZip(blob, report) {
   };
 }
 
-export async function verifyZipPayloads(blob, report) {
+export async function verifyZipPayloads(blob, report, progress = () => {}) {
   if (report.format !== 'ZIP') throw new Error('Open a ZIP archive first.');
   const eligible = report.rows.filter(entry => entry.kind !== 'Directory');
   const checks = [];
   let attempted = 0;
   let verified = 0;
   let budget = 256 * MiB;
-  for (const entry of eligible) {
+  const update = done => progress({
+    stage: 'Verifying ZIP payloads', done, total: eligible.length, unit: 'entries reviewed',
+    detail: verified + ' CRC32 verified · ' + (attempted - verified) + ' failed · ' + (done - attempted) + ' skipped'
+  });
+  for (const [index, entry] of eligible.entries()) {
+    if (index % 4 === 0) update(index);
     const cost = entry.size + entry.packed;
     if (!entry.open || Math.max(entry.size, entry.packed) > 128 * MiB || cost > budget || attempted === 512) continue;
     budget -= cost;
@@ -109,6 +118,7 @@ export async function verifyZipPayloads(blob, report) {
       checks.push({ status: 'Error', name: entry.name, message: error.message, offset: entry.offset });
     }
   }
+  update(eligible.length);
   return {
     attempted, verified, skipped: eligible.length - attempted,
     completeDirectory: report.status === 'ok' && report.rows.length === report.details['Declared entries'],

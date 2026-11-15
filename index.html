@@ -6,8 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Inspect game files directly on your device.">
   <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css?v=0.5.0">
-  <script type="module" src="./app.mjs?v=0.5.0"></script>
+  <link rel="stylesheet" href="./style.css?v=0.6.0">
+  <script type="module" src="./app.mjs?v=0.6.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -17,14 +17,13 @@
 <main>
   <section class="intro" aria-labelledby="title">
     <p class="eyebrow"><span></span> On-device analysis</p>
-    <h1 id="title">Inspect<br>game files<span>.</span></h1>
+    <h1 id="title">Inspect game files<span>.</span></h1>
     <p>Open game packages, compare versions and inspect bytes by offset. Files and reports stay in your browser.</p>
   </section>
   <section id="drop" class="drop">
-    <div class="chip" aria-hidden="true">[ + ]</div>
     <div>
-      <h2>Open a game file</h2>
-      <p>Drop a file here or choose one from your device.</p>
+      <h2 id="file-prompt">Open a game file</h2>
+      <p class="drop-hint">Drop a file here or choose one from your device.</p>
       <p class="formats">APK · APKS · XAPK · ZIP · DEX · ELF · PE · UNITYFS · GODOT PCK</p>
     </div>
     <button id="choose" class="primary">Choose file</button>
@@ -32,25 +31,36 @@
     <input type="file" id="candidate" hidden>
     <input type="file" id="byte-candidate" hidden>
   </section>
-  <p id="status" role="status" aria-live="polite"></p>
+  <section id="activity" class="activity" aria-label="Analysis activity" hidden>
+    <div class="activity-line">
+      <span id="activity-light" aria-hidden="true"></span>
+      <p id="status" role="status"></p>
+      <span id="activity-count" aria-hidden="true"></span>
+    </div>
+    <progress id="activity-progress" aria-label="Analysis progress" hidden></progress>
+    <p id="activity-detail"></p>
+  </section>
   <noscript>GameAutopsy needs JavaScript to read local files.</noscript>
   <section id="workspace" hidden aria-label="Analysis results">
     <div class="result-head">
       <div class="file-heading">
         <button id="parent" class="secondary" hidden>↑ Parent</button>
-        <p id="path" class="eyebrow"></p>
+        <nav id="path" class="breadcrumbs" aria-label="File path"></nav>
         <h2 id="filename"></h2>
       </div>
       <div class="result-actions">
         <button id="compare" class="secondary" hidden>Compare archive</button>
         <label id="nested-option" class="option" hidden><input id="nested-compare" type="checkbox" checked> Inspect nested archives</label>
         <button id="download-member" class="secondary" hidden>Save open entry ↓</button>
-        <button id="export" class="secondary">Download JSON ↓</button>
+        <button id="export" class="secondary">Current file JSON ↓</button>
+        <button id="export-full" class="primary">Export full JSON ↓</button>
       </div>
     </div>
+    <p id="export-feedback" class="help" hidden></p>
     <dl id="stats"></dl>
     <ul id="warnings" hidden></ul>
     <details id="metadata"><summary>Format and source details</summary><dl id="details"></dl></details>
+    <div class="workspace-body">
     <div class="tabs" role="tablist" aria-label="Analysis views">
       <button id="tab-structure" aria-selected="true" aria-controls="structure" role="tab">Structure</button>
       <button id="tab-inventory" aria-selected="false" aria-controls="inventory" role="tab" tabindex="-1" hidden>Inventory</button>
@@ -61,6 +71,7 @@
       <button id="tab-find" aria-selected="false" aria-controls="find" role="tab" tabindex="-1">Find bytes</button>
       <button id="tab-strings" aria-selected="false" aria-controls="strings" role="tab" tabindex="-1">Strings</button>
     </div>
+    <div class="workspace-panel">
     <section id="structure" role="tabpanel" aria-labelledby="tab-structure">
       <div class="table-tools">
         <label>Search structure<input id="search" type="search" placeholder="Name, type or offset" autocomplete="off"></label>
@@ -219,8 +230,10 @@
       <button id="hash" class="secondary">Compute SHA-256</button>
       <output id="digest"></output>
     </div>
+    </div>
+    </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.5.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.6.0</span></footer>
 </body>
 </html>

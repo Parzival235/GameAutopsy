@@ -1,4 +1,4 @@
-import { analyze, MiB, openZipMember } from './formats.mjs?v=0.5.0';
+import { analyze, MiB, openZipMember } from './formats.mjs?v=0.6.0';
 import { compareArchives, entriesByName } from './compare.mjs';
 
 const maxDepth = 3;
@@ -8,7 +8,7 @@ const maxBytes = 256 * MiB;
 const archiveName = /\.(?:zip|apk|apks|xapk|aab|ipa|obb)$/i;
 const priority = name => /(?:^|\/)(?:base|universal)\.apk$/i.test(name) ? 0 : /\.apk$/i.test(name) ? 1 : 2;
 
-export async function compareNestedArchives(before, after, result) {
+export async function compareNestedArchives(before, after, result, progress = () => {}) {
   const coverage = { groups: [], notices: [], skipped: 0, matchingArchives: 0, attempted: 0, bytesBudgeted: 0 };
   let rows = 0;
 
@@ -55,6 +55,7 @@ export async function compareNestedArchives(before, after, result) {
       }
       coverage.attempted++;
       coverage.bytesBudgeted += cost;
+      progress({ stage: 'Comparing nested archives', detail: coverage.attempted + ' archive pairs visited' });
       try {
         const firstBlob = (await openZipMember(left.blob, first)).blob;
         const secondBlob = (await openZipMember(right.blob, second)).blob;

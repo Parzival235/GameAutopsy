@@ -1,7 +1,7 @@
 import { inspectPck } from './pck.mjs';
 import { inspectAxml } from './axml.mjs';
 
-export const version = '0.5.0';
+export const version = '0.6.0';
 export const MiB = 1024 * 1024;
 const maxRows = 20000;
 const maxDirectory = 24 * MiB;
@@ -128,12 +128,15 @@ async function zipDirectory(blob) {
   return { count, length, offset, eocd, zip64 };
 }
 
-async function parseZip(blob, out) {
+async function parseZip(blob, out, progress) {
   const { count, length, offset, eocd, zip64 } = await zipDirectory(blob);
   Object.assign(out.details, { 'Declared entries': count, 'Central directory': hex(offset), 'Directory size': length, EOCD: hex(eocd), ZIP64: zip64 ? 'Yes' : 'No' });
+  progress({ stage: 'Reading ZIP central directory' });
   const data = await bytesAt(blob, offset, Math.min(length, maxDirectory));
   const d = view(data);
   let pos = 0;
+  const total = Math.min(count, maxRows);
+  progress({ stage: 'Parsing ZIP entries', done: 0, total, unit: 'entries' });
   while (out.rows.length < count && out.rows.length < maxRows) {
     if (pos + 46 > data.length) break;
     if (d.getUint32(pos, true) !== 0x02014b50) throw new Error('Invalid central directory entry signature.');
@@ -163,7 +166,9 @@ async function parseZip(blob, out) {
       open: !folder && !encrypted && disk === 0 && (method === 0 || method === 8)
     }));
     pos = end;
+    if (out.rows.length % 256 === 0) progress({ stage: 'Parsing ZIP entries', done: out.rows.length, total, unit: 'entries' });
   }
+  progress({ stage: 'Parsing ZIP entries', done: out.rows.length, total, unit: 'entries' });
   if (out.rows.length !== count) {
     if (out.rows.length === maxRows || length > maxDirectory) {
       out.warnings.push('The directory exceeds 20,000 entries or 24 MiB. The report contains the entries read so far.');
@@ -178,15 +183,25 @@ const crcTable = Uint32Array.from({ length: 256 }, (_, i) => {
   return i;
 });
 
-async function crcOf(blob) {
+async function crcOf(blob, progress) {
   let crc = -1;
+  let done = 0;
+  let nextUpdate = 0;
+  const update = () => progress({ stage: 'Checking entry CRC32', done, total: blob.size, unit: 'bytes' });
+  update();
   for await (const chunk of blob.stream()) {
     for (const byte of chunk) crc = crcTable[(crc ^ byte) & 255] ^ (crc >>> 8);
+    done += chunk.length;
+    if (done >= nextUpdate + 4 * MiB) {
+      update();
+      nextUpdate = done;
+    }
   }
+  update();
   return (crc ^ -1) >>> 0;
 }
 
-export async function openZipMember(blob, entry) {
+export async function openZipMember(blob, entry, progress = () => {}) {
   if (!entry.open) throw new Error('This entry cannot be opened in the browser.');
   if (entry.size > 128 * MiB || entry.packed > 128 * MiB) {
     throw new Error('The entry exceeds the 128 MiB open limit.');
@@ -198,6 +213,9 @@ export async function openZipMember(blob, entry) {
     const reader = packed.stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
     const parts = [];
     let size = 0;
+    let nextUpdate = 0;
+    const update = () => progress({ stage: 'Inflating ZIP entry', done: size, total: entry.size, unit: 'bytes' });
+    update();
     try {
       for (;;) {
         const { value, done } = await reader.read();
@@ -205,6 +223,10 @@ export async function openZipMember(blob, entry) {
         size += value.length;
         if (size > entry.size) throw new Error('Decompressed data exceeds the declared size.');
         parts.push(value);
+        if (size >= nextUpdate + 4 * MiB) {
+          update();
+          nextUpdate = size;
+        }
       }
     } catch (error) {
       await reader.cancel().catch(() => {});
@@ -212,9 +234,10 @@ export async function openZipMember(blob, entry) {
     } finally {
       reader.releaseLock();
     }
+    update();
     content = new Blob(parts);
   }
-  if (content.size !== entry.size || await crcOf(content) !== entry.crc32) {
+  if (content.size !== entry.size || await crcOf(content, progress) !== entry.crc32) {
     throw new Error('The entry size or CRC32 does not match.');
   }
   return { blob: content, dataOffset: start };
@@ -688,7 +711,8 @@ function entropy(bytes) {
   return Number(result.toFixed(3));
 }
 
-export async function analyze(blob, name) {
+export async function analyze(blob, name, progress = () => {}) {
+  progress({ stage: 'Reading file header' });
   const head = await bytesAt(blob, 0, Math.min(blob.size, 512));
   const format = identify(head, name);
   const out = {
@@ -697,13 +721,15 @@ export async function analyze(blob, name) {
   };
   const sample = Math.min(blob.size, 64 * 1024);
   if (sample) {
+    progress({ stage: 'Sampling file entropy' });
     out.details['Head entropy (bits/byte)'] = entropy(await bytesAt(blob, 0, sample));
     out.details['Tail entropy (bits/byte)'] = entropy(await bytesAt(blob, blob.size - sample, sample));
     out.details['Entropy sample size'] = sample;
   }
   try {
+    progress({ stage: 'Inspecting ' + format + ' structure' });
     switch (format) {
-      case 'ZIP': await parseZip(blob, out); break;
+      case 'ZIP': await parseZip(blob, out, progress); break;
       case 'DEX': await parseDex(blob, out); break;
       case 'ELF': await parseElf(blob, out, head); break;
       case 'PE': await parsePe(blob, out, head); break;
@@ -729,9 +755,10 @@ export async function preview(blob, offset) {
   return { offset, bytes: [...await bytesAt(blob, offset, Math.min(256, blob.size - offset))] };
 }
 
-export async function sampleStrings(blob) {
+export async function sampleStrings(blob, progress = () => {}) {
   const limit = 4 * MiB;
   const maxResults = 500;
+  progress({ stage: 'Reading string sample' });
   const data = await bytesAt(blob, 0, Math.min(blob.size, limit));
   const candidates = [];
   const printable = byte => byte >= 32 && byte <= 126;
@@ -755,8 +782,13 @@ export async function sampleStrings(blob) {
       }
     }
   }
+  progress({ stage: 'Scanning strings', done: 0, total: 3, unit: 'passes' });
   scan(0, 1, 'ASCII', i => printable(data[i]));
-  for (const start of [0, 1]) scan(start, 2, 'UTF-16LE', i => printable(data[i]) && data[i + 1] === 0);
+  progress({ stage: 'Scanning strings', done: 1, total: 3, unit: 'passes' });
+  for (const start of [0, 1]) {
+    scan(start, 2, 'UTF-16LE', i => printable(data[i]) && data[i + 1] === 0);
+    progress({ stage: 'Scanning strings', done: start + 2, total: 3, unit: 'passes' });
+  }
   candidates.sort((a, b) => a.offset - b.offset || a.encoding.localeCompare(b.encoding));
   return { scannedBytes: data.length, truncated: candidates.length > maxResults, rows: candidates.slice(0, maxResults) };
 }

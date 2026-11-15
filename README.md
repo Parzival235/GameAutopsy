@@ -24,6 +24,14 @@ GameAutopsy is a read-only game-file inspector that runs in your browser. Open t
 
 Offsets use bytes from the start of the current file unless labeled otherwise. ZIP structure offsets point to local headers. After opening an entry, **Format and source details** gives the local header and payload offsets in the parent archive. UnityFS file entries have a separate `streamOffset` into the decoded stream, while UnityFS block offsets point into the original bundle.
 
+## Export a full analysis report
+
+Click **Export full JSON** to create one `.gameautopsy-full.json` file for the current root and files opened in this session. The export runs any missing standard analyses on the active file: a first hex preview with both byte orders, the bounded string scan, and SHA-256 up to 256 MiB. For a ZIP, it also runs layout checks and bounded CRC32 verification. For a supported root archive, it adds the inventory. **Current file JSON** still downloads just the open file's existing report.
+
+The combined JSON includes the file reports, inventory, and recorded byte searches, hex previews, ZIP checks and archive or byte comparisons. Run searches and comparisons before export to include those inputs and results. Each recorded operation has a source path and a route of member indices, which distinguish duplicate paths. `automatic` records completed, reused, skipped or failed checks, and `omitted` counts optional history beyond the 16 Mi-character shared budget or the 96-item cap per history collection. The active and root reports and latest inventory are included separately from that history budget. Opening a different root starts a new report session. Exports are assembled in the Web Worker.
+
+While the tool is busy, the activity strip shows the current stage. When known, its counters measure work within that stage, such as ZIP entries reviewed or bytes read for hashing. You can use the breadcrumb links to return directly to an open parent.
+
 ## Search an entire package
 
 Open a ZIP-based package, UnityFS bundle, or standalone PCK and select **Inventory → Index root archive**. Filter by category or search for words from the filename, parent container path, row kind, or detected archive format. **Open** reconstructs the entry's location in the root package. The inventory stays available while you navigate its entries.

@@ -19,3 +19,4 @@
 *.gameautopsy-comparison.json
 *.gameautopsy-inventory.json
 *.gameautopsy-byte-diff.json
+*.gameautopsy-full.json

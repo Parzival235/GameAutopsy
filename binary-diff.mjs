@@ -32,7 +32,7 @@ export async function compareBytes(before, after, start = 0, onProgress = () => 
         runStart = -1;
       }
     }
-    if ((at - start) % (8 * MiB) === 0) onProgress({ scanned: stop - start, total: end - start });
+    if ((at - start) % (8 * MiB) === 0) onProgress({ stage: 'Comparing byte offsets', done: stop - start, total: end - start, unit: 'offsets' });
   }
   if (runStart >= 0) add(runStart, sharedEnd, 'changed');
 
@@ -42,6 +42,7 @@ export async function compareBytes(before, after, start = 0, onProgress = () => 
     result[kind] = end - tail;
     add(tail, end, kind);
   }
+  onProgress({ stage: 'Comparing byte offsets', done: end - start, total: end - start, unit: 'offsets' });
   result.omittedRanges = result.totalRanges - result.ranges.length;
   return result;
 }

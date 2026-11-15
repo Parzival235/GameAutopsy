@@ -3,8 +3,12 @@ import { interpretBytes } from './hex.mjs';
 const byId = id => document.getElementById(id);
 const pageSize = 80;
 const digits = new Intl.NumberFormat('en-US');
+const mobile = matchMedia('(max-width: 760px)');
+const setOrientation = () => document.querySelector('.tabs').setAttribute('aria-orientation', mobile.matches ? 'horizontal' : 'vertical');
+mobile.addEventListener('change', setOrientation);
+setOrientation();
 const tabs = { structure: 'structure', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.5.0', { type: 'module' });
+const worker = new Worker('./worker.mjs?v=0.6.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
@@ -31,7 +35,7 @@ worker.addEventListener('message', ({ data: { id, data, error, progress } }) => 
   const callback = pending.get(id);
   if (!callback) return;
   if (progress) {
-    callback.onProgress?.(progress);
+    activityProgress(progress);
     return;
   }
   pending.delete(id);
@@ -44,11 +48,11 @@ worker.addEventListener('error', () => {
   pending.clear();
 });
 
-function call(action, args, onProgress) {
+function call(action, args) {
   if (workerError) return Promise.reject(workerError);
   const id = ++requestId;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject, onProgress });
+    pending.set(id, { resolve, reject });
     try {
       worker.postMessage({ id, action, ...args });
     } catch (error) {
@@ -59,8 +63,32 @@ function call(action, args, onProgress) {
 }
 
 function status(text, error = false) {
-  byId('status').textContent = text;
-  byId('status').classList.toggle('error', error);
+  const activity = byId('activity');
+  const label = byId('status');
+  if (label.textContent !== text) label.textContent = text;
+  activity.hidden = !text;
+  activity.dataset.state = error ? 'error' : busy ? 'busy' : 'done';
+  label.classList.toggle('error', error);
+}
+
+function activityProgress({ stage, done, total, unit, detail }) {
+  status(stage);
+  const bar = byId('activity-progress');
+  const measured = Number.isFinite(total) && total > 0 && Number.isFinite(done);
+  bar.hidden = false;
+  if (measured) {
+    bar.max = total;
+    bar.value = done;
+    bar.setAttribute('aria-valuetext', digits.format(done) + ' of ' + digits.format(total) + ' ' + unit);
+  } else {
+    bar.removeAttribute('value');
+    bar.removeAttribute('aria-valuetext');
+  }
+  byId('activity-count').textContent = measured ? Math.floor(100 * done / total) + '%' : '';
+  const measuredText = measured ? digits.format(done) + ' / ' + digits.format(total) + ' ' + unit : '';
+  const details = [measuredText, detail].filter(Boolean).join(' · ');
+  byId('activity-detail').textContent = details;
+  byId('activity-detail').hidden = !details;
 }
 
 async function perform(label, work) {
@@ -68,16 +96,23 @@ async function perform(label, work) {
   busy = true;
   byId('workspace').setAttribute('aria-busy', 'true');
   byId('choose').disabled = true;
-  status(label);
+  byId('export-full').disabled = true;
+  activityProgress({ stage: label });
+  let message;
+  let error;
   try {
-    await work();
-    status('');
-  } catch (error) {
-    status(error.message, true);
+    message = await work();
+  } catch (failure) {
+    error = failure.message;
   } finally {
     busy = false;
     byId('choose').disabled = false;
+    byId('export-full').disabled = false;
     byId('workspace').setAttribute('aria-busy', 'false');
+    byId('activity-progress').hidden = true;
+    byId('activity-count').textContent = '';
+    byId('activity-detail').hidden = true;
+    status(error ?? (typeof message === 'string' ? message : 'Analysis ready'), Boolean(error));
   }
 }
 
@@ -181,7 +216,27 @@ function show(data) {
   current = data;
   const { path, report } = current;
   const { source, details } = report;
-  byId('path').textContent = path.length > 1 ? path.slice(0, -1).join(' › ') : 'Root file';
+  const breadcrumbs = [];
+  for (const [index, name] of path.entries()) {
+    if (index) {
+      const separator = node('span', ' › ');
+      separator.setAttribute('aria-hidden', 'true');
+      breadcrumbs.push(separator);
+    }
+    if (index === path.length - 1) {
+      const active = node('span', path.length === 1 ? 'Root file' : 'Current file');
+      active.setAttribute('aria-current', 'location');
+      breadcrumbs.push(active);
+    } else {
+      const button = node('button', name);
+      button.addEventListener('click', () => perform('Opening ancestor…', async () =>
+        show(await call('ancestor', { index }))));
+      breadcrumbs.push(button);
+    }
+  }
+  byId('path').replaceChildren(...breadcrumbs);
+  document.body.classList.add('has-file');
+  byId('export-feedback').hidden = true;
   byId('filename').textContent = report.name;
   byId('parent').hidden = path.length === 1;
   byId('compare').hidden = report.format !== 'ZIP';
@@ -221,13 +276,13 @@ function show(data) {
   byId('search').value = '';
   byId('offset').value = '0x0';
   byId('hexview').textContent = '';
-  byId('string-rows').replaceChildren();
-  byId('string-info').textContent = '';
-  byId('digest').textContent = '';
+  renderStrings(report.strings);
+  byId('digest').textContent = report.sha256 ?? '';
   page = 0;
   setTab('structure');
   renderRows();
   byId('workspace').hidden = false;
+  byId('file-prompt').textContent = 'Open another file';
 }
 
 function renderInspector() {
@@ -472,6 +527,8 @@ for (const name of Object.keys(tabs)) {
     const visible = Object.keys(tabs).filter(key => !byId('tab-' + key).hidden);
     const index = visible.indexOf(name);
     const target = {
+      ArrowUp: mobile.matches ? undefined : (index + visible.length - 1) % visible.length,
+      ArrowDown: mobile.matches ? undefined : (index + 1) % visible.length,
       ArrowLeft: (index + visible.length - 1) % visible.length,
       ArrowRight: (index + 1) % visible.length, Home: 0, End: visible.length - 1
     }[event.key];
@@ -527,9 +584,12 @@ byId('hex-next').addEventListener('click', () =>
 );
 byId('endian').addEventListener('change', renderInspector);
 
-byId('scan').addEventListener('click', () => perform('Scanning strings…', async () => {
-  const result = await call('strings');
-  current.report.strings = result;
+function renderStrings(result) {
+  if (!result) {
+    byId('string-info').textContent = '';
+    byId('string-rows').replaceChildren();
+    return;
+  }
   byId('string-info').textContent = digits.format(result.rows.length) + ' strings in ' +
     bytes(result.scannedBytes) + (result.truncated ? ' · Result limit reached' : '');
   byId('string-rows').replaceChildren(...result.rows.map(({ offset, encoding, text }) => {
@@ -544,6 +604,11 @@ byId('scan').addEventListener('click', () => perform('Scanning strings…', asyn
     tr.append(at, node('td', encoding), node('td', text));
     return tr;
   }));
+}
+
+byId('scan').addEventListener('click', () => perform('Scanning strings…', async () => {
+  current.report.strings = await call('strings');
+  renderStrings(current.report.strings);
 }));
 
 byId('hash').addEventListener('click', () => perform('Computing SHA-256…', async () => {
@@ -573,6 +638,24 @@ byId('download-member').addEventListener('click', () => perform('Preparing downl
 byId('export').addEventListener('click', () => {
   downloadJson({ ...current.report, path: current.path }, current.report.name, '.gameautopsy.json');
 });
+byId('export-full').addEventListener('click', () => perform('Preparing the full report…', async () => {
+  const result = await call('full-report');
+  for (const [name, value] of Object.entries(result.updates)) {
+    if (value != null) current.report[name] = value;
+  }
+  renderStrings(current.report.strings);
+  byId('digest').textContent = current.report.sha256 ?? '';
+  updateChecks();
+  if (result.inventory) showInventory(result.inventory);
+  downloadBlob(result.output, result.name, '.gameautopsy-full.json');
+  const feedback = byId('export-feedback');
+  feedback.textContent = 'Full JSON prepared · ' + result.files + ' file reports · ' + result.operations + ' recorded operations' +
+    (result.warnings ? ' · ' + result.warnings + ' incomplete checks' : '') +
+    (result.omitted ? ' · ' + result.omitted + ' history entries beyond the report limit' : '');
+  feedback.hidden = false;
+  return 'Full report prepared';
+}));
+
 byId('export-comparison').addEventListener('click', () => {
   downloadJson(comparison, comparison.candidate, '.gameautopsy-comparison.json');
 });
@@ -626,16 +709,18 @@ function renderInventory() {
   }));
 }
 
-byId('inventory-run').addEventListener('click', () => perform('Indexing the root archive…', async () => {
-  inventory = await call('inventory', {}, progress =>
-    status('Indexing… ' + digits.format(progress.entries) + ' entries in ' + progress.containers + ' containers')
-  );
+function showInventory(result) {
+  inventory = result;
   inventoryPage = 0;
   const notices = inventory.notices.map(item => node('li', item.path.join(' › ') + ' — ' + item.reason));
   if (inventory.skipped > notices.length) notices.push(node('li', 'Additional notices are counted in the total.'));
   byId('inventory-notices').replaceChildren(...notices);
   renderInventory();
-}));
+}
+
+byId('inventory-run').addEventListener('click', () => perform('Indexing the root archive…', async () =>
+  showInventory(await call('inventory'))
+));
 for (const [id, event] of [['inventory-query', 'input'], ['inventory-category', 'change']]) {
   byId(id).addEventListener(event, () => { inventoryPage = 0; renderInventory(); });
 }
@@ -679,9 +764,7 @@ function renderBinaryRanges() {
 
 function scanBinary(offset, file) {
   return perform('Comparing bytes…', async () => {
-    const result = await call('diff-bytes', { offset, file }, ({ scanned, total }) =>
-      status('Comparing bytes… ' + bytes(scanned) + ' / ' + bytes(total))
-    );
+    const result = await call('diff-bytes', { offset, file });
     binaryDiff = result;
     binaryPage = 0;
     byId('byte-files').textContent = result.before + ' (' + bytes(result.beforeSize) + ') ↔ ' +
