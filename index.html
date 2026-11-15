@@ -6,8 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Inspect game files directly on your device.">
   <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css?v=0.7.0">
-  <script type="module" src="./app.mjs?v=0.7.0"></script>
+  <link rel="stylesheet" href="./style.css?v=0.8.0">
+  <script type="module" src="./app.mjs?v=0.8.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -24,7 +24,7 @@
     <div>
       <h2 id="file-prompt">Open a game file</h2>
       <p class="drop-hint">Drop a file here or choose one from your device.</p>
-      <p class="formats">APK · APKS · XAPK · ZIP · DEX · ELF · PE · UNITYFS · GODOT PCK</p>
+      <p class="formats">APK · APKS · XAPK · ZIP · DEX · ELF · PE · UNITYFS · UNITY ASSETS · GODOT PCK</p>
     </div>
     <button id="choose" class="primary">Choose file</button>
     <input type="file" id="file" hidden>
@@ -37,6 +37,7 @@
       <p id="status" role="status"></p>
       <span id="activity-count" aria-hidden="true"></span>
     </div>
+    <button id="hash-cancel" class="secondary" type="button" hidden>Cancel SHA-256</button>
     <progress id="activity-progress" aria-label="Analysis progress" hidden></progress>
     <p id="activity-detail"></p>
   </section>
@@ -271,6 +272,6 @@
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.7.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.8.0</span></footer>
 </body>
 </html>

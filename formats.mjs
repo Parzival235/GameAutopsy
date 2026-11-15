@@ -1,7 +1,10 @@
 import { inspectPck } from './pck.mjs';
-import { inspectAxml } from './axml.mjs?v=0.7.0';
+import { inspectAxml } from './axml.mjs?v=0.8.0';
+import { inspectSerializedFile, looksLikeSerializedFile } from './unity-serialized.mjs?v=0.8.0';
 
-export const version = '0.7.0';
+import { decodeUnityLzma, maxLzmaBlock } from './unity-lzma.mjs?v=0.8.0';
+
+export const version = '0.8.0';
 export const MiB = 1024 * 1024;
 const maxRows = 20000;
 const maxDirectory = 24 * MiB;
@@ -36,7 +39,7 @@ const starts = (bytes, signature) => signature.every((v, i) => bytes[i] === v);
 const zipMagic = b => starts(b, [80, 75, 3, 4]) || starts(b, [80, 75, 5, 6]) || starts(b, [80, 75, 7, 8]);
 const row = (name, kind, offset, size, extra = {}) => ({ name, kind, offset, size, ...extra });
 
-export function identify(bytes, name = '') {
+export function identify(bytes, name = '', size = bytes.length) {
   const text = ascii(bytes.subarray(0, 8));
   if (zipMagic(bytes)) return 'ZIP';
   if (starts(bytes, [127, 69, 76, 70])) return 'ELF';
@@ -54,6 +57,7 @@ export function identify(bytes, name = '') {
   if (starts(bytes, [31, 139])) return 'GZIP';
   if (starts(bytes, [55, 122, 188, 175, 39, 28])) return '7z';
   if (starts(bytes, [0, 97, 115, 109])) return 'WebAssembly';
+  if (looksLikeSerializedFile(bytes, name, size)) return 'Unity serialized file';
   return /\.(zip|apk|apks|xapk|aab|ipa)$/i.test(name) ? 'ZIP' : 'Binary';
 }
 
@@ -590,12 +594,12 @@ async function parseUnity(blob, out, head) {
   requireRange(size, directory, packed);
   if (directory < headSize) throw new Error('The UnityFS directory overlaps the header.');
   out.rows.push(row('Blocks info', 'UnityFS directory', directory, packed));
-  if (![0, 2, 3].includes(method) || Math.max(packed, unpacked) > maxDirectory) {
+  if (![0, 1, 2, 3].includes(method) || Math.max(packed, unpacked) > maxDirectory) {
     out.warnings.push('The UnityFS directory uses an unsupported compression method or exceeds 24 MiB.');
     return;
   }
   const payload = await bytesAt(blob, directory, packed);
-  const table = method ? decodeLz4(payload, unpacked) : payload;
+  const table = method === 1 ? decodeUnityLzma(payload, unpacked) : method ? decodeLz4(payload, unpacked) : payload;
   if (table.length !== unpacked) throw new Error('The UnityFS directory size does not match the header.');
   let dataStart = fromEnd ? headSize : directory + packed;
   if (!oldFlags && flags & 0x200) dataStart = align16(dataStart);
@@ -665,10 +669,14 @@ export async function openUnityMember(blob, report, entry) {
     if (method === 0) {
       if (block.size !== block.unpackedSize) throw new Error(block.name + ' has inconsistent Raw sizes.');
       part = blob.slice(block.offset + from, block.offset + to);
-    } else if (method === 2 || method === 3) {
-      if (Math.max(block.size, block.unpackedSize) > 32 * MiB) throw new Error(block.name + ' exceeds the 32 MiB LZ4 block limit.');
+    } else if ([1, 2, 3].includes(method)) {
+      const compression = unityCompression[method];
+      const limit = method === 1 ? maxLzmaBlock : 32 * MiB;
+      if (Math.max(block.size, block.unpackedSize) > limit) {
+        throw new Error(block.name + ' exceeds the 32 MiB ' + compression + ' block limit.');
+      }
       const packed = await bytesAt(blob, block.offset, block.size);
-      const decoded = decodeLz4(packed, block.unpackedSize);
+      const decoded = method === 1 ? decodeUnityLzma(packed, block.unpackedSize) : decodeLz4(packed, block.unpackedSize);
       part = decoded.subarray(from, to);
     } else {
       throw new Error(block.name + ' uses unsupported compression (' + (unityCompression[method] ?? method) + ').');
@@ -714,7 +722,7 @@ function entropy(bytes) {
 export async function analyze(blob, name, progress = () => {}) {
   progress({ stage: 'Reading file header' });
   const head = await bytesAt(blob, 0, Math.min(blob.size, 512));
-  const format = identify(head, name);
+  const format = identify(head, name, blob.size);
   const out = {
     schema: 'gameautopsy/1', version, name, format, size: blob.size, status: 'ok',
     details: {}, rows: [], warnings: []
@@ -734,6 +742,7 @@ export async function analyze(blob, name, progress = () => {}) {
       case 'ELF': await parseElf(blob, out, head); break;
       case 'PE': await parsePe(blob, out, head); break;
       case 'UnityFS': await parseUnity(blob, out, head); break;
+      case 'Unity serialized file': await inspectSerializedFile(blob, out, head, progress); break;
       case 'Android binary XML': await parseAndroidXml(blob, out, head); break;
       case 'Godot PCK': await inspectPck(blob, out, head); break;
       case 'IL2CPP metadata':

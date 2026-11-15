@@ -8,7 +8,7 @@ const setOrientation = () => document.querySelector('.tabs').setAttribute('aria-
 mobile.addEventListener('change', setOrientation);
 setOrientation();
 const tabs = { structure: 'structure', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', 'apk-set': 'apk-set', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.7.0', { type: 'module' });
+const worker = new Worker('./worker.mjs?v=0.8.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
@@ -27,13 +27,14 @@ let activeSearch;
 let requestId = 0;
 let busy = false;
 let workerError;
+let hashRequest;
 const pending = new Map();
 
 const hex = (number, width = 0) => number.toString(16).toUpperCase().padStart(width, '0');
 const address = number => number == null ? '—' : '0x' + hex(number);
 const bytes = number => number == null ? '—' : digits.format(number) + ' B';
 
-worker.addEventListener('message', ({ data: { id, data, error, progress } }) => {
+worker.addEventListener('message', ({ data: { id, data, error, canceled, progress } }) => {
   const callback = pending.get(id);
   if (!callback) return;
   if (progress) {
@@ -41,7 +42,7 @@ worker.addEventListener('message', ({ data: { id, data, error, progress } }) => 
     return;
   }
   pending.delete(id);
-  if (error) callback.reject(new Error(error));
+  if (error) callback.reject(canceled ? new DOMException(error, 'AbortError') : new Error(error));
   else callback.resolve(data);
 });
 worker.addEventListener('error', () => {
@@ -53,6 +54,11 @@ worker.addEventListener('error', () => {
 function call(action, args) {
   if (workerError) return Promise.reject(workerError);
   const id = ++requestId;
+  if (action === 'sha256') {
+    hashRequest = id;
+    byId('hash-cancel').hidden = false;
+    byId('hash-cancel').disabled = false;
+  }
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
     try {
@@ -105,9 +111,12 @@ async function perform(label, work) {
   try {
     message = await work();
   } catch (failure) {
-    error = failure.message;
+    if (failure.name === 'AbortError') message = failure.message;
+    else error = failure.message;
   } finally {
     busy = false;
+    hashRequest = undefined;
+    byId('hash-cancel').hidden = true;
     byId('choose').disabled = false;
     byId('export-full').disabled = false;
     byId('workspace').setAttribute('aria-busy', 'false');
@@ -168,7 +177,7 @@ function renderRows() {
     }
     const actions = node('td');
     if (entry.open) actions.append(actionButton('Open', () =>
-      perform('Opening archive entry…', async () => show(await call('member', { index })))
+      perform('Opening entry…', async () => show(await call('member', { index })))
     ));
     if (entry.offset != null && entry.offset < current.report.size) {
       actions.append(actionButton('Hex', () =>
@@ -617,6 +626,12 @@ byId('scan').addEventListener('click', () => perform('Scanning strings…', asyn
   current.report.strings = await call('strings');
   renderStrings(current.report.strings);
 }));
+
+byId('hash-cancel').addEventListener('click', () => {
+  if (hashRequest == null) return;
+  byId('hash-cancel').disabled = true;
+  worker.postMessage({ cancelHash: hashRequest });
+});
 
 byId('hash').addEventListener('click', () => perform('Computing SHA-256…', async () => {
   const digest = await call('sha256');

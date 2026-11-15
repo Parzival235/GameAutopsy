@@ -5,10 +5,10 @@ GameAutopsy is a read-only game-file inspector that runs in your browser. Open t
 ## Inspect a file
 
 1. Choose a file or drag it onto the page.
-2. In **Structure**, search for a path, type, or offset. Use **Open** on a ZIP entry to inspect its contents, or **Hex** to highlight its range in the current file. For ZIP entries, this shortcut highlights the fixed part of the local header.
+2. In **Structure**, search for a path, type, or offset. Use **Open** on a supported entry to inspect its contents, or **Hex** to highlight its range in the current file. For ZIP entries, this shortcut highlights the fixed part of the local header.
 3. In **Hex**, use a decimal or hexadecimal offset, step through 256-byte pages, or interpret the bytes at the current offset as signed integers, unsigned integers, or floats in either byte order.
 4. In **Find bytes**, enter UTF-8 text or a hex sequence such as `55 6E ?? 74`. Click a result to highlight the match in Hex. **Continue search** resumes at the next unchecked offset.
-5. Use **Strings**, **Compute SHA-256**, or **Download JSON** on the current file. **Save open entry** downloads the bytes of an opened ZIP, UnityFS or Godot PCK member to your device. Reports include any ZIP checks, string sample and SHA-256 you ran for the current file.
+5. Use **Strings**, **Compute SHA-256**, or **Current file JSON** on the current file. **Save open entry** downloads the exact bytes of an opened archive entry or Unity object to your device. Reports include any ZIP checks, string sample and SHA-256 you ran for the current file.
 
 | Format | What GameAutopsy reads |
 | --- | --- |
@@ -16,7 +16,8 @@ GameAutopsy is a read-only game-file inspector that runs in your browser. Open t
 | DEX | Headers, ID tables, class definition tables and map entries. DEX 041 containers can contain multiple logical files with offsets relative to the physical file. |
 | ELF 32/64 | Architecture, byte order, entry address, segment permissions, sections, file offsets and 16 KiB LOAD alignment checks. |
 | PE32 / PE32+ | Architecture, entry RVA, image base, sections and data directories. |
-| UnityFS 6–8 | Header, block table and file directory for standard Raw, LZ4 and LZ4HC directories. Shows packed blocks and decoded file offsets. Open or save members that span Raw, LZ4 and LZ4HC blocks. |
+| UnityFS 6–8 | Header, block table and file directory. Open members from Raw, LZMA, LZ4 and LZ4HC blocks. |
+| Unity serialized files 17–26 | Object table with exact 64-bit Path IDs, class IDs, type hashes, metadata records, payload ranges and external file references. |
 | Android binary XML | UTF-8 and UTF-16LE pools, XML elements, attributes and typed values with exact record offsets. Manifest summary covers package, split, version, SDK levels and declared permissions. |
 | Godot PCK v0–v4 | Standalone pack directories, paths, declared MD5, payload ranges and entry flags. Open or save ordinary unencrypted files. |
 | IL2CPP metadata | Signature and selected header fields. |
@@ -26,11 +27,19 @@ Offsets use bytes from the start of the current file unless labeled otherwise. Z
 
 ## Export a full analysis report
 
-Click **Export full JSON** to create one `.gameautopsy-full.json` file for the current root and files opened in this session. The export runs any missing standard analyses on the active file: a first hex preview with both byte orders, the bounded string scan, and SHA-256 up to 256 MiB. For a ZIP, it also runs layout checks and bounded CRC32 verification. For a supported root archive, it adds the inventory. **Current file JSON** still downloads just the open file's existing report.
+Click **Export full JSON** to create one `.gameautopsy-full.json` file for the current root and files opened in this session. The export runs any missing standard analyses on the active file: a first hex preview with both byte orders, the bounded string scan, and SHA-256 up to 256 MiB. To include a digest for a larger file, use **Compute SHA-256** first. The worker hashes 1 MiB slices, shows hashed bytes, and supports **Cancel SHA-256** during that manual operation. For a ZIP, it also runs layout checks and bounded CRC32 verification. For a supported root archive, it adds the inventory. **Current file JSON** still downloads just the open file's existing report.
 
 The combined JSON includes the file reports, inventory, and recorded byte searches, hex previews, ZIP checks and archive or byte comparisons. Run searches and comparisons before export to include those inputs and results. Each recorded operation has a source path and a route of member indices, which distinguish duplicate paths. `automatic` records completed, reused, skipped or failed checks, and `omitted` counts optional history beyond the 16 Mi-character shared budget or the 96-item cap per history collection. The active and root reports and latest inventory are included separately from that history budget. Opening a different root starts a new report session. Exports are assembled in the Web Worker.
 
 While the tool is busy, the activity strip shows the current stage. When known, its counters measure work within that stage, such as ZIP entries reviewed or bytes read for hashing. You can use the breadcrumb links to return directly to an open parent.
+
+## Locate a Unity object
+
+1. Open a Unity serialized file such as `sharedassets0.assets`, or open a serialized member (often `CAB-…`) from a UnityFS bundle.
+2. In **Structure**, filter by a class name such as `Texture2D` or `MonoBehaviour`, an exact Path ID, or an external file path. Expand **Format and source details** for the engine version, byte order, class counts, and coverage.
+3. Use **Record** to inspect the object table entry, **Hex** to jump to its payload in the serialized file, or **Open → Save open entry** to save that object's raw serialized bytes. **Export full JSON** includes the indexed object and external reference records for opened files, subject to the report retention limits.
+
+External reference rows report the declared path, GUID bytes, and one-based File ID. A reference can point outside the current bundle. Raw object bytes can also refer to streamed texture or audio data in separate resource files. Type trees are located and skipped to index the object table. The inspector does not deserialize object fields or convert textures, audio, and meshes.
 
 ## Search an entire package
 
@@ -73,9 +82,9 @@ Open an APK, APKS, XAPK, or a ZIP/APKM containing APK members. Select **APK set 
 
 - Files and reports stay on the device. There is no backend, telemetry, or CDN dependency. To launch the app without internet access, serve a downloaded copy on localhost.
 - ZIP directories are limited to 20,000 entries or 24 MiB of directory data. ZIP comparison requires two complete directories. Encrypted, split, and unsupported compression formats remain visible as metadata when the directory can be read.
-- Nested ZIPs support six levels, up to 128 MiB per opened entry and 256 MiB total for entries held open. Whole-file SHA-256 supports up to 256 MiB. The string sampler scans the first 4 MiB and returns up to 500 results. Byte search accepts up to 128 bytes and stops each pass at 64 MiB, 200 matches or a comparison budget. Resume to scan farther.
+- Nested ZIPs support six levels, up to 128 MiB per opened entry and 256 MiB total for entries held open. The string sampler scans the first 4 MiB and returns up to 500 results. Byte search accepts up to 128 bytes and stops each pass at 64 MiB, 200 matches or a comparison budget. Resume to scan farther.
 - PCK inspection supports standalone packs. The directory read is limited to 24 MiB or 20,000 entries. Declared MD5 values come from the directory. Encrypted directories, special entry payloads (including encrypted, delta, removal and sparse entries), and executable-embedded packs are outside this release.
-- UnityFS opens individual files from standard bundles. LZ4/LZ4HC blocks are limited to 32 MiB each. LZMA, encrypted bundles and Unity serialized-object decoding are outside this release.
+- UnityFS directory data is capped at 24 MiB. Compressed blocks are limited to 32 MiB each, and opened members to 128 MiB. Encrypted bundles are outside this release. Unity serialized inspection is limited to 24 MiB of metadata and 20,000 structure rows per file.
 - DEX inspection lists structures at the table level. DEX 041 traversal is limited to 64 logical headers and the overall structure row cap. Unknown future versions and malformed structures are reported with warnings.
 
 ## Run your own copy
@@ -103,8 +112,11 @@ node --test tests/*.test.mjs
 | [ImHex](https://github.com/WerWolv/ImHex#features) | Interpret the same bytes with different widths and byte orders. |
 | [Kaitai Struct Web IDE](https://kaitai.io/news/2024/02/21/web-ide-improvements.html) | Link structure rows to byte ranges and preserve parsed rows when a later record fails. |
 | [UABEA](https://github.com/nesrak1/UABEA) and [UnityPy issue 377](https://github.com/K0lb3/UnityPy/issues/377) | Open individual UnityFS members and use block flags even when packed and decoded sizes match. |
+| [UnityDataTools](https://github.com/Unity-Technologies/UnityDataTools) and [UnityPy](https://github.com/K0lb3/UnityPy) | Validate Unity object and external reference tables against published engine fixtures and independent format readers. |
 | [Apktool issue 2990](https://github.com/iBotPeaches/Apktool/issues/2990) and [AOSP AXML structures](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/libs/androidfw/include/androidfw/ResourceTypes.h) | Retain resource IDs and typed data when attribute names or resource labels are unavailable. |
 | [Android zipalign](https://developer.android.com/tools/zipalign) and [APK Signature Scheme v2](https://source.android.com/docs/security/features/apksigning/v2) | Check actual payload offsets and report signing-block IDs with their positions. |
+
+The vendored [lzma-purejs decoder](vendor/lzma/LICENSE) runs offline. SHA-256 uses the [FIPS 180-4](https://csrc.nist.gov/pubs/fips/180-4/upd1/final) block and padding rules.
 
 Format references include [ZIP](https://support.pkware.com/pkzip/appnote), [DEX](https://source.android.com/docs/core/runtime/dex-format), [ELF](https://gabi.xinuos.com/elf/), [PE](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format), [UnityFS](https://reverseengineering.wiki/index.php/Format:Unity_asset_bundle_(UnityFS)), and [LZ4](https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md).
 

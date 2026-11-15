@@ -155,6 +155,7 @@ body.has-file .drop h2 { font-size: 1rem; margin: 0; }
 .activity[data-state="error"] { border-color: #85744b; }
 #activity-detail { margin: 4px 0 0 16px; color: var(--muted); font: .76rem/1.5 var(--mono); overflow-wrap: anywhere; }
 #activity-count { margin-left: auto; font: .78rem var(--mono); white-space: nowrap; color: var(--accent); }
+#hash-cancel { margin: 7px 0 0 16px; }
 #activity-progress { display: block; width: 100%; height: 5px; margin: 9px 0 3px; accent-color: var(--accent); }
 #activity-progress:not([value]) {
   appearance: none;

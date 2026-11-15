@@ -1,19 +1,21 @@
-import { preview, sampleStrings, MiB } from './formats.mjs?v=0.7.0';
-import { compareArchives } from './compare.mjs?v=0.7.0';
-import { compareNestedArchives } from './nested-compare.mjs?v=0.7.0';
-import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.7.0';
-import { searchBytes } from './byte-search.mjs?v=0.7.0';
-import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.7.0';
-import { buildInventory } from './inventory.mjs?v=0.7.0';
-import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.7.0';
+import { preview, sampleStrings } from './formats.mjs?v=0.8.0';
+import { compareArchives } from './compare.mjs?v=0.8.0';
+import { compareNestedArchives } from './nested-compare.mjs?v=0.8.0';
+import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.8.0';
+import { searchBytes } from './byte-search.mjs?v=0.8.0';
+import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.8.0';
+import { buildInventory } from './inventory.mjs?v=0.8.0';
+import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.8.0';
 import { interpretBytes } from './hex.mjs';
 import { canInspectApkSet, inspectApkSet } from './apk-set.mjs';
 import { createReportSession } from './report-session.mjs';
+import { hashSha256 } from './sha256.mjs?v=0.8.0';
 
 const stack = [];
 let inventory;
 let bytePair;
 let session = createReportSession();
+let activeHash;
 
 async function appendMember(nodes, index, progress) {
   if (nodes.length >= maxDepth + 1) throw new Error('The six-level nesting limit has been reached.');
@@ -52,35 +54,6 @@ async function zipChecks(node, progress, verify = false, refresh = false) {
   return report.zipChecks;
 }
 
-async function sha256(blob, progress) {
-  if (blob.size > maxExpanded) throw new Error('Whole-file SHA-256 is available for files up to 256 MiB.');
-  const buffer = new Uint8Array(blob.size);
-  let done = 0;
-  let last = 0;
-  const update = () => progress({ stage: 'Reading bytes for SHA-256', done, total: blob.size, unit: 'bytes' });
-  update();
-  const reader = blob.stream().getReader();
-  try {
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      buffer.set(chunk.value, done);
-      done += chunk.value.length;
-      if (done >= last + 4 * MiB) {
-        update();
-        last = done;
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  if (done !== blob.size) throw new Error('The file ended before all SHA-256 bytes were read.');
-  update();
-  progress({ stage: 'Computing SHA-256 digest' });
-  const digest = await crypto.subtle.digest('SHA-256', buffer);
-  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
 async function startHex(blob, offset) {
   const data = await preview(blob, offset);
   const typed = little => Object.fromEntries(Object.entries(interpretBytes(data.bytes, little)).map(([key, value]) =>
@@ -113,7 +86,7 @@ async function fullReport(progress) {
   await job('strings', 'Sampling strings', node, report.strings ? 'reused' : null,
     async () => { report.strings = await sampleStrings(blob, progress); });
   await job('sha256', 'Hashing the active file', node, report.sha256 ? 'reused' : blob.size > maxExpanded ? 'sizeLimit' : null,
-    async () => { report.sha256 = await sha256(blob, progress); });
+    async () => { report.sha256 = await hashSha256(blob, progress); });
   const isZip = report.format === 'ZIP';
   await job('zipLayout', 'Checking ZIP layout', node, !isZip ? 'notApplicable' : report.zipChecks ? 'reused' : null,
     () => zipChecks(node, progress));
@@ -140,7 +113,7 @@ async function fullReport(progress) {
   };
 }
 
-async function run({ action, file, index, offset, query, mode, nested, abi }, progress) {
+async function run({ action, file, index, offset, query, mode, nested, abi }, progress, signal) {
   switch (action) {
     case 'open': {
       const node = await inspect(file, file.name, undefined, progress);
@@ -233,7 +206,7 @@ async function run({ action, file, index, offset, query, mode, nested, abi }, pr
       return session.record(node, 'zipCrc32', await zipChecks(node, progress, true));
     }
     case 'download': {
-      if (stack.length <= 1) throw new Error('Open an archive member first.');
+      if (stack.length <= 1) throw new Error('Open an entry first.');
       return current().blob;
     }
     case 'search-bytes': {
@@ -252,7 +225,7 @@ async function run({ action, file, index, offset, query, mode, nested, abi }, pr
     }
     case 'sha256': {
       const node = current();
-      node.report.sha256 = await sha256(node.blob, progress);
+      node.report.sha256 ??= await hashSha256(node.blob, progress, signal);
       return session.record(node, 'sha256', node.report.sha256);
     }
     default: throw new Error('Unknown action.');
@@ -260,10 +233,21 @@ async function run({ action, file, index, offset, query, mode, nested, abi }, pr
 }
 
 self.addEventListener('message', async event => {
-  const { id } = event.data;
+  const { id, action, cancelHash } = event.data;
+  if (cancelHash != null) {
+    if (activeHash?.id === cancelHash) {
+      activeHash.controller.abort(new DOMException('SHA-256 canceled.', 'AbortError'));
+    }
+    return;
+  }
+  const controller = action === 'sha256' ? new AbortController() : null;
+  if (controller) activeHash = { id, controller };
   try {
-    self.postMessage({ id, data: await run(event.data, progress => self.postMessage({ id, progress })) });
+    const data = await run(event.data, progress => self.postMessage({ id, progress }), controller?.signal);
+    self.postMessage({ id, data });
   } catch (error) {
-    self.postMessage({ id, error: error.message });
+    self.postMessage({ id, error: error.message, canceled: error.name === 'AbortError' });
+  } finally {
+    if (activeHash?.id === id) activeHash = undefined;
   }
 });

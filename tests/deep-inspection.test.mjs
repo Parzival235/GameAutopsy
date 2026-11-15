@@ -172,7 +172,7 @@ test('UnityFS opens a file across Raw and LZ4 blocks even when LZ4 sizes are equ
     { kind: 'UnityFS block', streamOffset: 10, unpackedSize: 21, offset: 10, size: 21, flags: 2 }
   ] };
   assert.equal(await (await openUnityMember(payload, report, { streamOffset: 8, size: 11 })).text(), '89AAAAAA123');
-  report.rows[1].flags = 1;
+  report.rows[1].flags = 4;
   await assert.rejects(openUnityMember(payload, report, { streamOffset: 8, size: 11 }), /unsupported compression/);
 });
 
