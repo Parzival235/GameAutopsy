@@ -4,7 +4,7 @@ const scanLimit = 64 * MiB;
 const resultLimit = 200;
 const probeLimit = 8_000_000;
 
-function parsePattern(query, mode) {
+export function parsePattern(query, mode) {
   if (mode === 'text') {
     const bytes = [...new TextEncoder().encode(query)];
     if (bytes.length && bytes.length <= 128) return bytes;
@@ -21,17 +21,24 @@ function parsePattern(query, mode) {
 }
 
 export async function searchBytes(blob, query, mode, from = 0, progress = () => {}) {
-  const pattern = parsePattern(query, mode);
+  const { probes, ...result } = await scanPattern(blob, parsePattern(query, mode), from, {}, progress);
+  return result;
+}
+
+export async function scanPattern(blob, pattern, from, {
+  maxOffsets = scanLimit, maxHits = resultLimit, maxProbes = probeLimit
+} = {}, progress = () => {}) {
   if (!Number.isSafeInteger(from) || from < 0 || from > blob.size) throw new Error('Search offset is outside the file.');
   const fixed = pattern.flatMap((value, index) => value === null ? [] : [[index, value]]);
   const [anchor, value] = fixed[0];
-  const end = Math.min(Math.max(from, blob.size - pattern.length + 1), from + scanLimit);
+  const end = Math.min(Math.max(from, blob.size - pattern.length + 1), from + maxOffsets);
   const offsets = [];
   let probes = 0;
   const update = done => progress({ stage: 'Searching byte offsets', done, total: end - from, unit: 'offsets' });
   const result = stop => {
     update(stop - from);
-    return { from, end: stop, length: pattern.length, offsets, next: stop < blob.size - pattern.length + 1 ? stop : null };
+    return { from, end: stop, length: pattern.length, offsets, probes,
+      next: stop < blob.size - pattern.length + 1 ? stop : null };
   };
   for (let at = from; at < end; at += chunkSize) {
     if ((at - from) % (4 * MiB) === 0) update(at - from);
@@ -47,9 +54,13 @@ export async function searchBytes(blob, query, mode, from = 0, progress = () => 
           matches = false;
           break;
         }
+        if (probes >= maxProbes && j + 1 < fixed.length) {
+          // Retry this position next pass if it could still match.
+          return result(at + start);
+        }
       }
       if (matches) offsets.push(at + start);
-      if (offsets.length === resultLimit || probes >= probeLimit) return result(at + start + 1);
+      if (offsets.length === maxHits || probes >= maxProbes) return result(at + start + 1);
     }
   }
   return result(end);

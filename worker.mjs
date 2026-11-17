@@ -1,24 +1,26 @@
-import { preview } from './formats.mjs?v=0.13.0';
-import { compareArchives } from './compare.mjs?v=0.13.0';
-import { compareNestedArchives } from './nested-compare.mjs?v=0.13.0';
-import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.13.0';
-import { searchBytes } from './byte-search.mjs?v=0.13.0';
-import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.13.0';
-import { buildInventory } from './inventory.mjs?v=0.13.0';
-import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.13.0';
+import { preview } from './formats.mjs?v=0.14.0';
+import { compareArchives } from './compare.mjs?v=0.14.0';
+import { compareNestedArchives } from './nested-compare.mjs?v=0.14.0';
+import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.14.0';
+import { searchBytes } from './byte-search.mjs?v=0.14.0';
+import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.14.0';
+import { buildInventory } from './inventory.mjs?v=0.14.0';
+import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.14.0';
 import { interpretBytes } from './hex.mjs';
 import { canInspectApkSet, inspectApkSet } from './apk-set.mjs';
 import { createReportSession } from './report-session.mjs';
-import { createPayloadComparison } from './zip-content-diff.mjs?v=0.13.0';
-import { sampleStrings, scanStrings } from './string-scan.mjs?v=0.13.0';
-import { openZipEntryPair } from './zip-entry-pair.mjs?v=0.13.0';
-import { compareUnityFiles } from './unity-diff.mjs?v=0.13.0';
-import { inspectUnityFields } from './unity-fields.mjs?v=0.13.0';
-import { hashSha256 } from './sha256.mjs?v=0.13.0';
-import { exportInventory, exportLimit } from './inventory-export.mjs?v=0.13.0';
+import { createPayloadComparison } from './zip-content-diff.mjs?v=0.14.0';
+import { sampleStrings, scanStrings } from './string-scan.mjs?v=0.14.0';
+import { openZipEntryPair } from './zip-entry-pair.mjs?v=0.14.0';
+import { compareUnityFiles } from './unity-diff.mjs?v=0.14.0';
+import { inspectUnityFields } from './unity-fields.mjs?v=0.14.0';
+import { hashSha256 } from './sha256.mjs?v=0.14.0';
+import { exportInventory, exportLimit } from './inventory-export.mjs?v=0.14.0';
+import { planInventorySearch, searchInventory } from './inventory-search.mjs?v=0.14.0';
 
 const stack = [];
 let inventory;
+let inventorySearch;
 let bytePair;
 let archivePair;
 let unityCandidate;
@@ -72,6 +74,7 @@ async function startHex(blob, offset) {
 
 async function indexRoot(root, progress) {
   inventory = { ...await buildInventory(root, progress), exportLimit };
+  inventorySearch = undefined;
   return inventory;
 }
 
@@ -136,7 +139,7 @@ async function scanBytePair(node, pair, offset, progress, previewOffset) {
   });
 }
 
-async function run({ action, file, index, indices, offset, query, mode, nested, abi, verifyPayloads, stringOptions, scope, entryName, side, pathId }, progress, signal) {
+async function run({ action, file, index, indices, offset, query, mode, pathFilter, category, nested, abi, verifyPayloads, stringOptions, scope, entryName, side, pathId }, progress, signal) {
   switch (action) {
     case 'open': {
       const node = await inspect(file, file.name, undefined, progress);
@@ -144,6 +147,7 @@ async function run({ action, file, index, indices, offset, query, mode, nested, 
       node.path = [node.report.name];
       stack.splice(0, stack.length, node);
       inventory = undefined;
+      inventorySearch = undefined;
       bytePair = undefined;
       archivePair = undefined;
       unityCandidate = undefined;
@@ -193,6 +197,17 @@ async function run({ action, file, index, indices, offset, query, mode, nested, 
       const result = await exportInventory(root, inventory, indices, progress);
       session.record(root, 'inventoryExport', result.manifest);
       return result;
+    }
+    case 'inventory-search':
+    case 'inventory-search-more': {
+      current();
+      const root = stack[0];
+      const resume = action === 'inventory-search-more';
+      if (resume && !inventorySearch?.next) throw new Error('There is no inventory search to continue.');
+      const plan = resume ? inventorySearch.plan : planInventorySearch(inventory, query, mode, pathFilter, category);
+      const result = await searchInventory(root, plan, resume ? inventorySearch.next : undefined, progress);
+      inventorySearch = { plan, next: result.next };
+      return session.record(root, 'inventorySearch', result);
     }
     case 'apk-set': {
       current();

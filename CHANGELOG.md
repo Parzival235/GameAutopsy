@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.0
+
+- Search decoded text and wildcard hex patterns across filtered Inventory entries, including nested packages.
+- Continue from the next unchecked offset, jump to highlighted bytes, and export per-pass matches and coverage.
+
 ## 0.13.0
 
 - Download multiple selected Inventory entries as one local ZIP, including entries from different nested containers. Selection survives filtering and pagination.

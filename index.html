@@ -16,8 +16,8 @@
   <meta property="og:image:height" content="640">
   <meta property="og:image:alt" content="GameAutopsy showing a Unity object field changing from 0 to 7, with before and after byte offsets.">
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="stylesheet" href="./style.css?v=0.13.0">
-  <script type="module" src="./app.mjs?v=0.13.0"></script>
+  <link rel="stylesheet" href="./style.css?v=0.14.0">
+  <script type="module" src="./app.mjs?v=0.14.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -179,7 +179,7 @@
       <div class="table-tools">
         <button id="inventory-run" class="secondary">Index root archive</button>
         <button id="inventory-export" class="secondary" hidden>Download inventory JSON ↓</button>
-        <label>Search inventory<input id="inventory-query" type="search" placeholder="Path, kind or detected format" autocomplete="off"></label>
+        <label>Search inventory<input id="inventory-query" type="search" maxlength="512" placeholder="Path, kind or detected format" autocomplete="off"></label>
         <label>Category<select id="inventory-category">
           <option value="">All entries</option><option>Archive candidate</option><option>Code / binary</option>
           <option>Text / data</option><option>Media</option><option>Other</option>
@@ -187,6 +187,27 @@
       </div>
       <p id="inventory-summary" class="help" aria-live="polite">Index supported archive members from the root file.</p>
       <details id="inventory-coverage" hidden><summary>Coverage notes</summary><ul id="inventory-notices"></ul></details>
+      <details id="inventory-content-search" hidden>
+        <summary>Search file contents</summary>
+        <form id="inventory-content-form" class="table-tools">
+          <label>Mode<select id="inventory-content-mode"><option value="text">UTF-8 text</option><option value="hex">Hex pattern</option></select></label>
+          <label>Text or hex bytes <input id="inventory-content-query" type="text" maxlength="384" required autocomplete="off"></label>
+          <button id="inventory-content-run" class="secondary" type="submit">Search filtered contents</button>
+          <button id="inventory-content-next" class="secondary" type="button" hidden>Continue search</button>
+        </form>
+        <p class="help">Searches decoded bytes in matching inventory entries across all pages. Use ?? for a wildcard hex byte.</p>
+        <section id="inventory-content-result" aria-label="Content search results" hidden>
+          <p id="inventory-content-summary" class="help" role="status"></p>
+          <button id="inventory-content-export" class="secondary" type="button">Download search JSON ↓</button>
+          <div id="inventory-content-table" class="table-wrap" hidden>
+            <table>
+              <thead><tr><th scope="col">Entry path</th><th scope="col">Offsets in decoded entry</th></tr></thead>
+              <tbody id="inventory-content-rows"></tbody>
+            </table>
+          </div>
+          <details id="inventory-content-skipped" hidden><summary>Skipped entries</summary><ul id="inventory-content-notices"></ul></details>
+        </section>
+      </details>
       <div id="inventory-selection" class="table-tools" hidden>
         <button id="inventory-select-page" class="secondary" type="button">Select page</button>
         <button id="inventory-clear" class="secondary" type="button">Clear selection</button>
@@ -381,6 +402,6 @@
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.13.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.14.0</span></footer>
 </body>
 </html>

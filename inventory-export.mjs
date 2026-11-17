@@ -1,6 +1,6 @@
-import { crcOf, MiB } from './formats.mjs?v=0.13.0';
-import { openMember, readMember } from './archive-members.mjs?v=0.13.0';
-import { storedZip } from './stored-zip.mjs?v=0.13.0';
+import { crcOf, MiB } from './formats.mjs?v=0.14.0';
+import { inventoryReader } from './archive-members.mjs?v=0.14.0';
+import { storedZip } from './stored-zip.mjs?v=0.14.0';
 
 export const exportLimit = Object.freeze({ entries: 100, payloadBytes: 64 * MiB, workBytes: 192 * MiB });
 const maxPathUnits = 512 * 1024;
@@ -48,8 +48,6 @@ export async function exportInventory(root, inventory, indices, progress = () =>
     requested: ids.length, payloadBytes: 0, workBytes: 0, limits: exportLimit, entries: [], skipped: []
   };
   const output = [];
-  const nodes = [root];
-  const activeRoute = [];
   const files = new Set();
   const folders = new Set();
   let pathUnits = 0;
@@ -61,20 +59,7 @@ export async function exportInventory(root, inventory, indices, progress = () =>
     manifest.workBytes += size;
   }
 
-  async function findParent(route) {
-    const length = route.length - 1;
-    let shared = 0;
-    while (shared < length && activeRoute[shared] === route[shared]) shared++;
-    activeRoute.length = shared;
-    nodes.length = shared + 1;
-    for (let i = shared; i < length; i++) {
-      const parent = nodes.at(-1);
-      const child = await openMember(parent, parent.report.rows[route[i]], undefined, charge);
-      nodes.push(child);
-      activeRoute.push(route[i]);
-    }
-    return nodes.at(-1);
-  }
+  const read = inventoryReader(root, charge);
 
   for (const [position, id] of ids.entries()) {
     const record = inventory.rows[id];
@@ -88,13 +73,7 @@ export async function exportInventory(root, inventory, indices, progress = () =>
         throw new Error('The decoded payload would exceed the 64 MiB download limit.');
       }
       if (units > maxPathUnits - pathUnits) throw new Error('The manifest path text limit would be exceeded.');
-      const parent = await findParent(record.route);
-      const member = parent.report.rows[record.route.at(-1)];
-      if (member?.name !== record.name || member.size !== record.size) {
-        throw new Error('The indexed member could not be located.');
-      }
-      const { blob, source } = await readMember(parent, member, undefined, charge);
-      if (blob.size !== record.size) throw new Error('The decoded entry size differs from the index.');
+      const { blob, source, format } = await read(record);
       let crc32 = source.crc32;
       if (crc32 == null) {
         charge(blob.size);
@@ -102,8 +81,8 @@ export async function exportInventory(root, inventory, indices, progress = () =>
       }
       const name = safePath(record, files, folders);
       output.push({ name, blob, crc32 });
-      manifest.entries.push({ path, route: record.route, output: name, size: blob.size, containerFormat: parent.report.format,
-        source, verification: parent.report.format === 'ZIP' ? 'sourceZipCrc32' : 'decodedSize' });
+      manifest.entries.push({ path, route: record.route, output: name, size: blob.size, containerFormat: format,
+        source, verification: format === 'ZIP' ? 'sourceZipCrc32' : 'decodedSize' });
       manifest.payloadBytes += blob.size;
       pathUnits += units;
     } catch (error) {

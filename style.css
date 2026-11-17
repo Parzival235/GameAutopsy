@@ -130,6 +130,8 @@ footer { border-top: 1px solid var(--line); color: var(--muted); font: .74rem/1.
 #inventory-notices { overflow-wrap: anywhere; }
 #inventory-output :is(th, td):first-child { width: 1%; text-align: center; }
 #inventory-output input { width: 1.15rem; height: 1.15rem; accent-color: var(--accent); margin: 0; }
+#inventory-content-result { margin-block: 12px 20px; }
+#inventory-content-table, #inventory-content-skipped { margin-top: 10px; overflow-wrap: anywhere; }
 @media (max-width: 740px) { #byte-panels { grid-template-columns: 1fr; } }
 
 /* Workspace and activity */

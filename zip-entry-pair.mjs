@@ -1,5 +1,5 @@
-import { analyze, MiB, openZipMember } from './formats.mjs?v=0.13.0';
-import { isCompleteZip } from './compare.mjs?v=0.13.0';
+import { analyze, MiB, openZipMember } from './formats.mjs?v=0.14.0';
+import { isCompleteZip } from './compare.mjs?v=0.14.0';
 
 const maxInput = 384 * MiB;
 const maxExpanded = 128 * MiB;

@@ -1,4 +1,5 @@
 import { interpretBytes } from './hex.mjs';
+import { filterInventory } from './inventory-scope.mjs?v=0.14.0';
 
 const byId = id => document.getElementById(id);
 const pageSize = 80;
@@ -8,12 +9,13 @@ const setOrientation = () => document.querySelector('.tabs').setAttribute('aria-
 mobile.addEventListener('change', setOrientation);
 setOrientation();
 const tabs = { structure: 'structure', 'unity-fields': 'unity-fields', 'unity-diff': 'unity-diff', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', 'apk-set': 'apk-set', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.13.0', { type: 'module' });
+const worker = new Worker('./worker.mjs?v=0.14.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
 let comparisonPage = 0;
 let inventory;
+let inventoryContent;
 let apkSet;
 let apkNotesPage = 0;
 let inventoryPage = 0;
@@ -754,7 +756,7 @@ function open(file) {
 
 function runDemo(kind) {
   return perform('Opening synthetic demo files…', async () => {
-    const { demoUnity, demoArchive } = await import('./demo-fixtures.mjs?v=0.13.0');
+    const { demoUnity, demoArchive } = await import('./demo-fixtures.mjs?v=0.14.0');
     const [file, candidate] = kind === 'unity' ? demoUnity() : demoArchive();
     await loadRoot(file);
     if (kind === 'unity') {
@@ -1012,6 +1014,8 @@ function outputPage(name, index, length) {
 
 function updateInventorySelection() {
   if (!inventory) return;
+  byId('inventory-content-run').disabled = busy;
+  byId('inventory-content-next').disabled = busy;
   const count = inventorySelection.size;
   const limit = inventory.exportLimit.entries;
   byId('inventory-selected').textContent = count + ' / ' + limit + ' selected';
@@ -1029,6 +1033,7 @@ function renderInventory() {
   byId('inventory-output').hidden = !inventory;
   byId('inventory-export').hidden = !inventory;
   byId('inventory-selection').hidden = !inventory;
+  byId('inventory-content-search').hidden = !inventory;
   byId('inventory-coverage').hidden = !inventory?.notices.length;
   if (!inventory) {
     byId('inventory-summary').textContent = 'Index supported archive members from the root file.';
@@ -1040,15 +1045,12 @@ function renderInventory() {
     inventoryPageRows = [];
     inventorySelection.clear();
     byId('inventory-export-result').hidden = true;
+    byId('inventory-content-search').open = false;
+    byId('inventory-content-query').value = '';
+    showInventoryContent(undefined);
     return;
   }
-  const terms = byId('inventory-query').value.trim().toLowerCase().split(/\s+/);
-  const category = byId('inventory-category').value;
-  const matches = inventory.rows.filter(row => {
-    if (category && row.category !== category) return false;
-    const text = [...row.path, row.name, row.kind, row.category, row.detectedFormat].join(' ').toLowerCase();
-    return terms.every(term => text.includes(term));
-  });
+  const matches = filterInventory(inventory.rows, byId('inventory-query').value, byId('inventory-category').value);
   inventoryPage = outputPage('inventory', inventoryPage, matches.length);
   byId('inventory-summary').textContent = digits.format(matches.length) + ' of ' + digits.format(inventory.rows.length) +
     ' entries · ' + inventory.containers + ' containers · ' + inventory.skipped + ' coverage notes' +
@@ -1088,6 +1090,7 @@ function showInventory(result) {
   inventory = result;
   inventoryPage = 0;
   inventorySelection.clear();
+  showInventoryContent(undefined);
   byId('inventory-export-result').hidden = true;
   const notices = inventory.notices.map(item => node('li', item.path.join(' › ') + ' — ' + item.reason));
   if (inventory.skipped > notices.length) notices.push(node('li', 'Additional notices are counted in the total.'));
@@ -1130,6 +1133,57 @@ byId('inventory-download').addEventListener('click', () => perform('Exporting se
   feedback.hidden = false;
   return output ? 'Selection ZIP prepared' : 'No entries could be exported';
 }));
+
+function showInventoryContent(result) {
+  inventoryContent = result;
+  byId('inventory-content-result').hidden = !result;
+  byId('inventory-content-next').hidden = !result?.next;
+  if (!result) {
+    byId('inventory-content-rows').replaceChildren();
+    byId('inventory-content-notices').replaceChildren();
+    return;
+  }
+  const scope = [result.pathFilter, result.category].filter(Boolean).join(' · ') || 'All indexed entries';
+  const label = result.mode === 'text' ? 'UTF-8' : 'Hex';
+  const done = result.next?.member ?? result.members;
+  byId('inventory-content-summary').textContent = label + ' “' + result.query + '” · ' + scope +
+    ' · This pass: ' + result.matches + ' matches, ' + digits.format(result.offsetsChecked) + ' offsets checked, ' +
+    result.skipped.length + ' entries skipped · ' + done + ' / ' + result.members + ' entries processed' +
+    (result.next ? ' · More to search' : ' · Search scope finished') +
+    (result.inventoryCoverage.skipped ? ' · See inventory coverage notes' : '');
+  byId('inventory-content-table').hidden = !result.hits.length;
+  byId('inventory-content-rows').replaceChildren(...result.hits.map(hit => {
+    const row = node('tr');
+    const offsets = node('td');
+    for (const offset of hit.offsets) {
+      offsets.append(actionButton(address(offset), () => perform('Opening search match…', async () => {
+        show(await call('inventory-open', { index: hit.id }));
+        await showHex(offset, { start: offset, end: offset + result.length });
+        setTab('hex', true);
+      })));
+    }
+    const path = hit.path.join(' › ') + (hit.pathShortened ? ' (path shortened)' : '');
+    row.append(node('td', path), offsets);
+    return row;
+  }));
+  byId('inventory-content-skipped').hidden = !result.skipped.length;
+  byId('inventory-content-skipped').open = false;
+  byId('inventory-content-notices').replaceChildren(...result.skipped.map(item =>
+    node('li', item.path.join(' › ') + ' — ' + item.reason)));
+}
+
+byId('inventory-content-form').addEventListener('submit', event => {
+  event.preventDefault();
+  perform('Searching archive contents…', async () => showInventoryContent(await call('inventory-search', {
+    query: byId('inventory-content-query').value, mode: byId('inventory-content-mode').value,
+    pathFilter: byId('inventory-query').value, category: byId('inventory-category').value
+  })));
+});
+byId('inventory-content-next').addEventListener('click', () => perform('Continuing archive search…', async () =>
+  showInventoryContent(await call('inventory-search-more'))));
+byId('inventory-content-export').addEventListener('click', () => {
+  if (inventoryContent) downloadJson(inventoryContent, inventoryContent.root, '.gameautopsy-inventory-search.json');
+});
 
 const diffKinds = { changed: 'Changed', beforeOnly: 'Current file only', afterOnly: 'Comparison file only' };
 async function showBytePreview(offset) {
