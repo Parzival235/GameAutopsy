@@ -1,12 +1,12 @@
 import { inspectPck } from './pck.mjs';
-import { inspectAxml } from './axml.mjs?v=0.12.1';
-import { inspectSerializedFile, looksLikeSerializedFile } from './unity-serialized.mjs?v=0.12.1';
+import { inspectAxml } from './axml.mjs?v=0.13.0';
+import { inspectSerializedFile, looksLikeSerializedFile } from './unity-serialized.mjs?v=0.13.0';
 
-import { decodeUnityLzma, maxLzmaBlock } from './unity-lzma.mjs?v=0.12.1';
+import { decodeUnityLzma, maxLzmaBlock } from './unity-lzma.mjs?v=0.13.0';
 
-export { sampleStrings } from './string-scan.mjs?v=0.12.1';
+export { sampleStrings } from './string-scan.mjs?v=0.13.0';
 
-export const version = '0.12.1';
+export const version = '0.13.0';
 export const MiB = 1024 * 1024;
 const maxRows = 20000;
 const maxDirectory = 24 * MiB;
@@ -189,7 +189,7 @@ const crcTable = Uint32Array.from({ length: 256 }, (_, i) => {
   return i;
 });
 
-async function crcOf(blob, progress) {
+export async function crcOf(blob, progress = () => {}) {
   let crc = -1;
   let done = 0;
   let nextUpdate = 0;
@@ -653,7 +653,7 @@ function listUnityBlocks(bytes, dataStart, dataEnd, out) {
   }
 }
 
-export async function openUnityMember(blob, report, entry) {
+export async function openUnityMember(blob, report, entry, charge = () => {}) {
   if (entry.size > 128 * MiB) throw new Error('The UnityFS file exceeds the 128 MiB open limit.');
   const start = entry.streamOffset;
   const end = start + entry.size;
@@ -670,6 +670,7 @@ export async function openUnityMember(blob, report, entry) {
     let part;
     if (method === 0) {
       if (block.size !== block.unpackedSize) throw new Error(block.name + ' has inconsistent Raw sizes.');
+      charge(to - from);
       part = blob.slice(block.offset + from, block.offset + to);
     } else if ([1, 2, 3].includes(method)) {
       const compression = unityCompression[method];
@@ -677,6 +678,7 @@ export async function openUnityMember(blob, report, entry) {
       if (Math.max(block.size, block.unpackedSize) > limit) {
         throw new Error(block.name + ' exceeds the 32 MiB ' + compression + ' block limit.');
       }
+      charge(block.size + block.unpackedSize);
       const packed = await bytesAt(blob, block.offset, block.size);
       const decoded = method === 1 ? decodeUnityLzma(packed, block.unpackedSize) : decodeLz4(packed, block.unpackedSize);
       part = decoded.subarray(from, to);

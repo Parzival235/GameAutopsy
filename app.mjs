@@ -8,7 +8,7 @@ const setOrientation = () => document.querySelector('.tabs').setAttribute('aria-
 mobile.addEventListener('change', setOrientation);
 setOrientation();
 const tabs = { structure: 'structure', 'unity-fields': 'unity-fields', 'unity-diff': 'unity-diff', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', 'apk-set': 'apk-set', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.12.1', { type: 'module' });
+const worker = new Worker('./worker.mjs?v=0.13.0', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
@@ -17,6 +17,8 @@ let inventory;
 let apkSet;
 let apkNotesPage = 0;
 let inventoryPage = 0;
+let inventoryPageRows = [];
+const inventorySelection = new Set();
 let binaryDiff;
 let unityFields;
 let unityFieldsPage = 0;
@@ -111,6 +113,7 @@ async function perform(label, work) {
   byId('demo-unity').disabled = true;
   byId('demo-archive').disabled = true;
   byId('export-full').disabled = true;
+  updateInventorySelection();
   activityProgress({ stage: label });
   let message;
   let error;
@@ -127,6 +130,7 @@ async function perform(label, work) {
     byId('demo-unity').disabled = false;
     byId('demo-archive').disabled = false;
     byId('export-full').disabled = false;
+    updateInventorySelection();
     byId('workspace').setAttribute('aria-busy', 'false');
     byId('activity-progress').hidden = true;
     byId('activity-count').textContent = '';
@@ -750,7 +754,7 @@ function open(file) {
 
 function runDemo(kind) {
   return perform('Opening synthetic demo files…', async () => {
-    const { demoUnity, demoArchive } = await import('./demo-fixtures.mjs?v=0.12.1');
+    const { demoUnity, demoArchive } = await import('./demo-fixtures.mjs?v=0.13.0');
     const [file, candidate] = kind === 'unity' ? demoUnity() : demoArchive();
     await loadRoot(file);
     if (kind === 'unity') {
@@ -1006,9 +1010,25 @@ function outputPage(name, index, length) {
   return page;
 }
 
+function updateInventorySelection() {
+  if (!inventory) return;
+  const count = inventorySelection.size;
+  const limit = inventory.exportLimit.entries;
+  byId('inventory-selected').textContent = count + ' / ' + limit + ' selected';
+  byId('inventory-select-page').disabled = busy || count >= limit ||
+    !inventoryPageRows.some(row => row.open && !inventorySelection.has(row.id));
+  byId('inventory-clear').disabled = busy || !count;
+  byId('inventory-download').disabled = busy || !count;
+  for (const input of byId('inventory-rows').querySelectorAll('input[type="checkbox"]')) {
+    input.checked = inventorySelection.has(Number(input.value));
+    input.disabled = busy || (count >= limit && !input.checked);
+  }
+}
+
 function renderInventory() {
   byId('inventory-output').hidden = !inventory;
   byId('inventory-export').hidden = !inventory;
+  byId('inventory-selection').hidden = !inventory;
   byId('inventory-coverage').hidden = !inventory?.notices.length;
   if (!inventory) {
     byId('inventory-summary').textContent = 'Index supported archive members from the root file.';
@@ -1017,6 +1037,9 @@ function renderInventory() {
     byId('inventory-pages').hidden = true;
     byId('inventory-rows').replaceChildren();
     inventoryPage = 0;
+    inventoryPageRows = [];
+    inventorySelection.clear();
+    byId('inventory-export-result').hidden = true;
     return;
   }
   const terms = byId('inventory-query').value.trim().toLowerCase().split(/\s+/);
@@ -1030,8 +1053,23 @@ function renderInventory() {
   byId('inventory-summary').textContent = digits.format(matches.length) + ' of ' + digits.format(inventory.rows.length) +
     ' entries · ' + inventory.containers + ' containers · ' + inventory.skipped + ' coverage notes' +
     (inventory.truncated ? ' · Inventory limit reached' : '');
-  byId('inventory-rows').replaceChildren(...matches.slice(inventoryPage * pageSize, (inventoryPage + 1) * pageSize).map(row => {
+  inventoryPageRows = matches.slice(inventoryPage * pageSize, (inventoryPage + 1) * pageSize);
+  byId('inventory-rows').replaceChildren(...inventoryPageRows.map(row => {
     const tr = node('tr');
+    const select = node('td');
+    if (row.open) {
+      const input = node('input');
+      input.type = 'checkbox';
+      input.value = row.id;
+      input.setAttribute('aria-label', 'Select ' + row.name + ' (entry ' + (row.id + 1) + ')');
+      input.addEventListener('change', () => {
+        if (input.checked) inventorySelection.add(row.id);
+        else inventorySelection.delete(row.id);
+        updateInventorySelection();
+      });
+      select.append(input);
+    }
+    tr.append(select);
     for (const cell of [row.name, row.path.join(' › '), row.detectedFormat ?? row.category, bytes(row.size)]) {
       tr.append(node('td', cell));
     }
@@ -1043,11 +1081,14 @@ function renderInventory() {
     tr.append(actions);
     return tr;
   }));
+  updateInventorySelection();
 }
 
 function showInventory(result) {
   inventory = result;
   inventoryPage = 0;
+  inventorySelection.clear();
+  byId('inventory-export-result').hidden = true;
   const notices = inventory.notices.map(item => node('li', item.path.join(' › ') + ' — ' + item.reason));
   if (inventory.skipped > notices.length) notices.push(node('li', 'Additional notices are counted in the total.'));
   byId('inventory-notices').replaceChildren(...notices);
@@ -1065,6 +1106,30 @@ byId('inventory-next').addEventListener('click', () => { inventoryPage++; render
 byId('inventory-export').addEventListener('click', () =>
   downloadJson(inventory, inventory.root, '.gameautopsy-inventory.json')
 );
+byId('inventory-select-page').addEventListener('click', () => {
+  for (const row of inventoryPageRows) {
+    if (inventorySelection.size >= inventory.exportLimit.entries) break;
+    if (row.open) inventorySelection.add(row.id);
+  }
+  updateInventorySelection();
+});
+byId('inventory-clear').addEventListener('click', () => {
+  inventorySelection.clear();
+  updateInventorySelection();
+});
+byId('inventory-download').addEventListener('click', () => perform('Exporting selected entries…', async () => {
+  const feedback = byId('inventory-export-result');
+  feedback.hidden = true;
+  const { output, manifest } = await call('inventory-export', { indices: [...inventorySelection] });
+  if (output) downloadBlob(output, manifest.root, '.gameautopsy-selection.zip');
+  else downloadJson(manifest, manifest.root, '.gameautopsy-export-report.json');
+  const { entries, skipped } = manifest;
+  feedback.textContent = 'Exported ' + entries.length + ' of ' + manifest.requested + ' entries.' +
+    (skipped.length ? ' Skipped: ' + skipped.length + '. ' + skipped[0].reason : '') +
+    (output ? ' Details are in the ZIP manifest.' : ' Downloaded a report of the skipped entries.');
+  feedback.hidden = false;
+  return output ? 'Selection ZIP prepared' : 'No entries could be exported';
+}));
 
 const diffKinds = { changed: 'Changed', beforeOnly: 'Current file only', afterOnly: 'Comparison file only' };
 async function showBytePreview(offset) {

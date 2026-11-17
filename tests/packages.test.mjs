@@ -7,6 +7,7 @@ import { zip } from './zip-fixture.mjs';
 import { openMember } from '../archive-members.mjs';
 import { compareArchives } from '../compare.mjs';
 import { compareNestedArchives } from '../nested-compare.mjs';
+import { exportInventory } from '../inventory-export.mjs';
 
 const bytes = Buffer.from('PCK resource');
 
@@ -116,4 +117,16 @@ test('inventory indexes mixed containers and preserves exact open routes', async
   for (const index of hit.route) location = await openMember(location, location.report.rows[index]);
   assert.equal(await location.blob.text(), bytes.toString());
   assert.equal(location.report.source.dataOffset, pck.offset);
+
+  const { output, manifest } = await exportInventory(root, result, [hit.id]);
+  assert.equal(manifest.skipped.length, 0);
+  const [entry] = manifest.entries;
+  assert.equal(entry.containerFormat, 'Godot PCK');
+  assert.deepEqual(entry.path, [...hit.path, hit.name]);
+  assert.match(entry.output, /^files\/archive-0-0\/levels\//);
+  assert.equal(entry.verification, 'decodedSize');
+  assert.equal(entry.source.dataOffset, pck.offset);
+  const exported = { blob: output, report: await analyze(output, 'selection.zip') };
+  const saved = await openMember(exported, exported.report.rows.find(row => row.name === entry.output));
+  assert.equal(await saved.blob.text(), bytes.toString());
 });

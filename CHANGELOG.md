@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.0
+
+- Download multiple selected Inventory entries as one local ZIP, including entries from different nested containers. Selection survives filtering and pagination.
+- Add an export manifest with original paths, member indices, source offsets, verification and skipped entries. Bound decoded output and read work.
+
 ## 0.12.1
 
 - Added one-click Unity field and nested ZIP comparison demos. The app generates synthetic inputs in the browser and runs them through the same worker as local files.

@@ -63,6 +63,10 @@ A run checks up to 768 payload pairs, with an 8 MiB per-object limit and a 128 M
 
 Open a ZIP-based package, UnityFS bundle, or standalone PCK and select **Inventory → Index root archive**. Filter by category or search for words from the filename, parent container path, row kind, or detected archive format. **Open** reconstructs the entry's location in the root package. The inventory stays available while you navigate its entries.
 
+Select individual rows or use **Select page** to pick readable entries on the current page. The selection stays active when you change filters or pages. Use **Download selected ZIP** to save up to 100 entries with a combined decoded size of up to 64 MiB. The worker also caps packed, decoded and output checksum work at 192 MiB. Entries that exceed a budget or fail to decode appear in the export manifest. If all selected entries are skipped, the app saves the manifest as JSON.
+
+The output contains the raw member payloads in separate folders for each source container. Export paths are sanitized, and colliding names go into distinct folders. `gameautopsy-manifest.json` retains the original filenames, container paths, routes and offsets. ZIP members are checked against their stored CRC32. UnityFS and Godot PCK members are checked for readable ranges and decoded size. The PCK MD5 in the manifest is a declared value. The export is stored as an uncompressed ZIP.
+
 The index follows supported archive filename extensions, then checks the contents before traversing them. Category labels are filename hints. Extensionless containers require manual inspection. Indexing is bounded to four nested levels, 48 archive candidates including the root, 24,000 entries, 4 million UTF-16 code units of filename text, and 256 MiB of declared input. Coverage notes and JSON export identify skipped candidates and show how far the scan reached.
 
 ## Compare file bytes

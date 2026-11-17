@@ -16,8 +16,8 @@
   <meta property="og:image:height" content="640">
   <meta property="og:image:alt" content="GameAutopsy showing a Unity object field changing from 0 to 7, with before and after byte offsets.">
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="stylesheet" href="./style.css?v=0.12.1">
-  <script type="module" src="./app.mjs?v=0.12.1"></script>
+  <link rel="stylesheet" href="./style.css?v=0.13.0">
+  <script type="module" src="./app.mjs?v=0.13.0"></script>
 </head>
 <body>
 <header class="topbar">
@@ -187,9 +187,16 @@
       </div>
       <p id="inventory-summary" class="help" aria-live="polite">Index supported archive members from the root file.</p>
       <details id="inventory-coverage" hidden><summary>Coverage notes</summary><ul id="inventory-notices"></ul></details>
+      <div id="inventory-selection" class="table-tools" hidden>
+        <button id="inventory-select-page" class="secondary" type="button">Select page</button>
+        <button id="inventory-clear" class="secondary" type="button">Clear selection</button>
+        <button id="inventory-download" class="secondary" type="button">Download selected ZIP ↓</button>
+        <span id="inventory-selected" role="status"></span>
+      </div>
+      <p id="inventory-export-result" class="help" role="status" hidden></p>
       <div id="inventory-output" class="table-wrap" hidden>
         <table>
-          <thead><tr><th scope="col">Entry</th><th scope="col">Container path</th><th scope="col">Format or category</th><th scope="col">Size</th><th scope="col">Action</th></tr></thead>
+          <thead><tr><th scope="col">Select</th><th scope="col">Entry</th><th scope="col">Container path</th><th scope="col">Format or category</th><th scope="col">Size</th><th scope="col">Action</th></tr></thead>
           <tbody id="inventory-rows"></tbody>
         </table>
       </div>
@@ -374,6 +381,6 @@
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.12.1</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.13.0</span></footer>
 </body>
 </html>

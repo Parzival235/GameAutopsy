@@ -1,5 +1,5 @@
-import { compareBytes } from './binary-diff.mjs?v=0.12.1';
-import { inspectUnityFields } from './unity-fields.mjs?v=0.12.1';
+import { compareBytes } from './binary-diff.mjs?v=0.13.0';
+import { inspectUnityFields } from './unity-fields.mjs?v=0.13.0';
 
 const MiB = 1024 * 1024;
 const limits = { pairs: 768, bytes: 128 * MiB, objectBytes: 8 * MiB, rows: 5000, fieldsPerObject: 40, fieldsTotal: 1200, fieldReportChars: 2 * MiB };

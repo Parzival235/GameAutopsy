@@ -1,4 +1,4 @@
-import { analyze, MiB, openUnityMember, openZipMember } from './formats.mjs?v=0.12.1';
+import { analyze, MiB, openUnityMember, openZipMember } from './formats.mjs?v=0.13.0';
 
 export const maxDepth = 6;
 export const maxExpanded = 256 * MiB;
@@ -12,28 +12,37 @@ export async function inspect(blob, name, source, progress) {
   return { blob, report };
 }
 
-export async function openMember(parent, entry, progress = () => {}) {
+export async function readMember(parent, entry, progress = () => {}, charge = () => {}) {
   if (!entry?.open) throw new Error('That entry cannot be opened.');
   if (entry.size > maxMember) throw new Error('The entry exceeds the 128 MiB open limit.');
   const { blob, report } = parent;
   progress({ stage: 'Opening ' + entry.name });
   switch (report.format) {
     case 'UnityFS':
-      return inspect(await openUnityMember(blob, report, entry), entry.name, { streamOffset: entry.streamOffset }, progress);
+      return { blob: await openUnityMember(blob, report, entry, charge), source: { streamOffset: entry.streamOffset } };
     case 'Unity serialized file':
-      return inspect(blob.slice(entry.offset, entry.offset + entry.size), entry.name + '.bin', {
+      charge(entry.size);
+      return { blob: blob.slice(entry.offset, entry.offset + entry.size), source: {
         dataOffset: entry.offset, pathId: entry.pathId, classId: entry.classId
-      }, progress);
+      } };
     case 'Godot PCK':
-      return inspect(blob.slice(entry.offset, entry.offset + entry.size), entry.name, {
+      charge(entry.size);
+      return { blob: blob.slice(entry.offset, entry.offset + entry.size), source: {
         dataOffset: entry.offset, declaredMd5: entry.declaredMd5
-      }, progress);
+      } };
     case 'ZIP': {
+      charge(entry.packed + entry.size);
       const opened = await openZipMember(blob, entry, progress);
-      return inspect(opened.blob, entry.name, {
+      return { blob: opened.blob, source: {
         localHeaderOffset: entry.offset, dataOffset: opened.dataOffset, crc32: entry.crc32
-      }, progress);
+      } };
     }
     default: throw new Error('That format has no openable entries.');
   }
+}
+
+export async function openMember(parent, entry, progress = () => {}, charge) {
+  const { blob, source } = await readMember(parent, entry, progress, charge);
+  const name = parent.report.format === 'Unity serialized file' ? entry.name + '.bin' : entry.name;
+  return inspect(blob, name, source, progress);
 }

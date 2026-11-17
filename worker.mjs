@@ -1,20 +1,21 @@
-import { preview } from './formats.mjs?v=0.12.1';
-import { compareArchives } from './compare.mjs?v=0.12.1';
-import { compareNestedArchives } from './nested-compare.mjs?v=0.12.1';
-import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.12.1';
-import { searchBytes } from './byte-search.mjs?v=0.12.1';
-import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.12.1';
-import { buildInventory } from './inventory.mjs?v=0.12.1';
-import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.12.1';
+import { preview } from './formats.mjs?v=0.13.0';
+import { compareArchives } from './compare.mjs?v=0.13.0';
+import { compareNestedArchives } from './nested-compare.mjs?v=0.13.0';
+import { checkZip, verifyZipPayloads } from './zip-checks.mjs?v=0.13.0';
+import { searchBytes } from './byte-search.mjs?v=0.13.0';
+import { archiveFormat, inspect, maxDepth, maxExpanded, openMember } from './archive-members.mjs?v=0.13.0';
+import { buildInventory } from './inventory.mjs?v=0.13.0';
+import { compareBytes, previewDiff } from './binary-diff.mjs?v=0.13.0';
 import { interpretBytes } from './hex.mjs';
 import { canInspectApkSet, inspectApkSet } from './apk-set.mjs';
 import { createReportSession } from './report-session.mjs';
-import { createPayloadComparison } from './zip-content-diff.mjs?v=0.12.1';
-import { sampleStrings, scanStrings } from './string-scan.mjs?v=0.12.1';
-import { openZipEntryPair } from './zip-entry-pair.mjs?v=0.12.1';
-import { compareUnityFiles } from './unity-diff.mjs?v=0.12.1';
-import { inspectUnityFields } from './unity-fields.mjs?v=0.12.1';
-import { hashSha256 } from './sha256.mjs?v=0.12.1';
+import { createPayloadComparison } from './zip-content-diff.mjs?v=0.13.0';
+import { sampleStrings, scanStrings } from './string-scan.mjs?v=0.13.0';
+import { openZipEntryPair } from './zip-entry-pair.mjs?v=0.13.0';
+import { compareUnityFiles } from './unity-diff.mjs?v=0.13.0';
+import { inspectUnityFields } from './unity-fields.mjs?v=0.13.0';
+import { hashSha256 } from './sha256.mjs?v=0.13.0';
+import { exportInventory, exportLimit } from './inventory-export.mjs?v=0.13.0';
 
 const stack = [];
 let inventory;
@@ -69,6 +70,11 @@ async function startHex(blob, offset) {
   return { ...data, littleEndian: typed(true), bigEndian: typed(false) };
 }
 
+async function indexRoot(root, progress) {
+  inventory = { ...await buildInventory(root, progress), exportLimit };
+  return inventory;
+}
+
 async function fullReport(progress) {
   const node = current();
   const { blob, report } = node;
@@ -104,7 +110,7 @@ async function fullReport(progress) {
     async () => { root.report.apkSet = await inspectApkSet(root, '', progress); });
   await job('inventory', 'Indexing the root archive', root,
     !archiveFormat(root.report.format) ? 'notApplicable' : inventory ? 'reused' : null,
-    async () => { inventory = await buildInventory(root, progress); });
+    () => indexRoot(root, progress));
   session.retainFile(node);
   progress({ stage: 'Assembling the full report' });
   const payload = session.snapshot(root, node, automatic, inventory);
@@ -130,7 +136,7 @@ async function scanBytePair(node, pair, offset, progress, previewOffset) {
   });
 }
 
-async function run({ action, file, index, offset, query, mode, nested, abi, verifyPayloads, stringOptions, scope, entryName, side, pathId }, progress, signal) {
+async function run({ action, file, index, indices, offset, query, mode, nested, abi, verifyPayloads, stringOptions, scope, entryName, side, pathId }, progress, signal) {
   switch (action) {
     case 'open': {
       const node = await inspect(file, file.name, undefined, progress);
@@ -168,8 +174,7 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       return listing();
     case 'inventory':
       current();
-      inventory = await buildInventory(stack[0], progress);
-      return inventory;
+      return indexRoot(stack[0], progress);
     case 'inventory-open': {
       const record = inventory?.rows[index];
       if (!record?.open) throw new Error('That inventory entry cannot be opened.');
@@ -181,6 +186,13 @@ async function run({ action, file, index, offset, query, mode, nested, abi, veri
       archivePair = undefined;
       unityCandidate = undefined;
       return listing();
+    }
+    case 'inventory-export': {
+      current();
+      const root = stack[0];
+      const result = await exportInventory(root, inventory, indices, progress);
+      session.record(root, 'inventoryExport', result.manifest);
+      return result;
     }
     case 'apk-set': {
       current();

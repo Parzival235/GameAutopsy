@@ -15,6 +15,7 @@ In the Unity demo, object **Path ID 3** changes from layer **0** to **7**. Open 
 | Compare two APKs, APK sets or ZIP packages | Added, removed and repacked paths, nested archives, and optional byte-for-byte verification of decoded entries. |
 | Inspect a Unity bundle or compare its assets | UnityFS members, serialized object Path IDs and references. Supported embedded TypeTrees reveal changed fields and their byte offsets. |
 | Inspect Android and native binaries | APK split dependencies and ABIs, binary Android manifests, ZIP alignment, DEX tables, ELF segments and PE sections. |
+| Export selected archive files | Filter the nested inventory, select entries across pages, and download one ZIP with the original paths, source offsets and any skipped items in a manifest. |
 | Trace and export evidence | Hex, resumable strings and byte search, SHA-256, entry downloads and one JSON report for the analysis session. |
 
 GameAutopsy reads files without modifying them. It compares Unity objects by Path ID within each serialized file. See the [supported formats, verification limits and self-hosting instructions](docs/manual.md).
