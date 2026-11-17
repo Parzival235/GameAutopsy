@@ -137,6 +137,11 @@ body.has-file .intro { display: none; }
 body.has-file .drop { margin-top: 16px; padding-block: 12px; }
 body.has-file .drop .formats, body.has-file .drop .drop-hint { display: none; }
 body.has-file .drop h2 { font-size: 1rem; margin: 0; }
+body.has-file .demos { display: none; }
+.demos { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding: 16px 0 28px; }
+.demos h2 { font-size: 1rem; margin: 0 0 4px; }
+.demos p { color: var(--muted); font-size: .9rem; margin: 0; }
+.demo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .drop { margin-bottom: 16px; border-radius: 12px; }
 #workspace { border-radius: 16px; }
 .result-head { gap: 18px; }

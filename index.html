@@ -4,10 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
-  <meta name="description" content="Inspect game files directly on your device.">
-  <title>GameAutopsy</title>
-  <link rel="stylesheet" href="./style.css?v=0.12.0">
-  <script type="module" src="./app.mjs?v=0.12.0"></script>
+  <title>GameAutopsy — APK, Unity and Game File Analyzer</title>
+  <meta name="description" content="Inspect APKs, Unity assets and Godot packs in your browser. Compare game builds, trace changes to byte offsets and export JSON reports. No file uploads.">
+  <link rel="canonical" href="https://parzival235.github.io/GameAutopsy/">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://parzival235.github.io/GameAutopsy/">
+  <meta property="og:title" content="GameAutopsy — APK, Unity and Game File Analyzer">
+  <meta property="og:description" content="Compare game builds and trace changes to exact bytes. Runs locally in your browser.">
+  <link rel="stylesheet" href="./style.css?v=0.12.1">
+  <script type="module" src="./app.mjs?v=0.12.1"></script>
 </head>
 <body>
 <header class="topbar">
@@ -18,7 +23,17 @@
   <section class="intro" aria-labelledby="title">
     <p class="eyebrow"><span></span> On-device analysis</p>
     <h1 id="title">Inspect game files<span>.</span></h1>
-    <p>Open game packages, compare versions and inspect bytes by offset. Files and reports stay in your browser.</p>
+    <p>Inspect APKs, Unity assets and Godot packs. Compare game builds, trace changes to byte offsets and export JSON. Your files stay on your device.</p>
+  </section>
+  <section id="demos" class="demos" aria-labelledby="demos-title">
+    <div>
+      <h2 id="demos-title">Try it with sample files</h2>
+      <p>See the analysis using synthetic files generated on your device.</p>
+    </div>
+    <div class="demo-actions">
+      <button id="demo-unity" class="secondary" type="button">Try Unity field diff</button>
+      <button id="demo-archive" class="secondary" type="button">Try nested ZIP diff</button>
+    </div>
   </section>
   <section id="drop" class="drop">
     <div>
@@ -354,6 +369,6 @@
     </div>
   </section>
 </main>
-<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.12.0</span></footer>
+<footer><span>GameAutopsy</span><span>Read-only file inspector · v0.12.1</span></footer>
 </body>
 </html>

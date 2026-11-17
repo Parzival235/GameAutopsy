@@ -8,7 +8,7 @@ const setOrientation = () => document.querySelector('.tabs').setAttribute('aria-
 mobile.addEventListener('change', setOrientation);
 setOrientation();
 const tabs = { structure: 'structure', 'unity-fields': 'unity-fields', 'unity-diff': 'unity-diff', inventory: 'inventory', binary: 'binary', hex: 'hex', compare: 'comparison', 'apk-set': 'apk-set', checks: 'checks', find: 'find', strings: 'strings' };
-const worker = new Worker('./worker.mjs?v=0.12.0', { type: 'module' });
+const worker = new Worker('./worker.mjs?v=0.12.1', { type: 'module' });
 let current;
 let page = 0;
 let comparison;
@@ -108,6 +108,8 @@ async function perform(label, work) {
   busy = true;
   byId('workspace').setAttribute('aria-busy', 'true');
   byId('choose').disabled = true;
+  byId('demo-unity').disabled = true;
+  byId('demo-archive').disabled = true;
   byId('export-full').disabled = true;
   activityProgress({ stage: label });
   let message;
@@ -122,6 +124,8 @@ async function perform(label, work) {
     hashRequest = undefined;
     byId('hash-cancel').hidden = true;
     byId('choose').disabled = false;
+    byId('demo-unity').disabled = false;
+    byId('demo-archive').disabled = false;
     byId('export-full').disabled = false;
     byId('workspace').setAttribute('aria-busy', 'false');
     byId('activity-progress').hidden = true;
@@ -431,7 +435,7 @@ function renderUnityDiff() {
   }));
 }
 
-function renderUnityEvidence(row) {
+function renderUnityEvidence(row, scroll = true) {
   const diff = row.fieldDiff;
   const section = byId('unity-diff-evidence');
   const title = byId('unity-diff-evidence-title');
@@ -467,7 +471,39 @@ function renderUnityEvidence(row) {
     return tr;
   }));
   section.hidden = false;
-  title.scrollIntoView({ block: 'nearest' });
+  if (scroll) title.scrollIntoView({ block: 'nearest' });
+}
+
+async function loadUnityCandidate(file) {
+  const result = await call('unity-diff-candidate', { file });
+  byId('unity-diff-candidate-name').textContent = result.name;
+  byId('unity-diff-member-label').hidden = !result.members.length;
+  byId('unity-diff-member').replaceChildren(...result.members.map(member => {
+    const option = node('option', member.name + ' (' + bytes(member.size) + ')');
+    option.value = member.index;
+    return option;
+  }));
+  byId('unity-diff-run').disabled = false;
+  byId('unity-diff-output').hidden = true;
+}
+
+function showUnityDiff(result) {
+  unityDiff = result;
+  unityDiffPage = 0;
+  byId('unity-diff-evidence').hidden = true;
+  byId('unity-diff-query').value = '';
+  const c = result.coverage;
+  byId('unity-diff-coverage').textContent =
+    result.baseline + ' → ' + (result.candidateContainer ? result.candidateContainer + ' › ' : '') + result.candidate +
+    ' · Object tables ' + c.beforeIndexed + '/' + c.beforeDeclared + ' and ' + c.afterIndexed + '/' + c.afterDeclared +
+    ' · ' + c.pairs + ' payload pairs checked · ' + c.fieldPairs + ' field comparisons (' +
+    c.partialFieldPairs + ' partial) · ' + result.counts.unknown + ' unresolved' +
+    (c.omittedRows ? ' · ' + c.omittedRows + ' object rows omitted' : '') +
+    (c.omittedFields ? ' · ' + c.omittedFields + ' field changes omitted' : '');
+  definitions(byId('unity-diff-counts'), Object.fromEntries(Object.entries(result.counts)
+    .filter(([, value]) => value > 0).map(([key, value]) => [unityDiffLabels[key], digits.format(value)])));
+  renderUnityDiff();
+  byId('unity-diff-output').hidden = false;
 }
 
 const unityFile = byId('unity-diff-file');
@@ -476,40 +512,14 @@ unityFile.addEventListener('change', () => {
   const file = unityFile.files[0];
   unityFile.value = '';
   if (!file) return;
-  perform('Opening Unity candidate…', async () => {
-    const result = await call('unity-diff-candidate', { file });
-    byId('unity-diff-candidate-name').textContent = result.name;
-    byId('unity-diff-member-label').hidden = !result.members.length;
-    byId('unity-diff-member').replaceChildren(...result.members.map(member => {
-      const option = node('option', member.name + ' (' + bytes(member.size) + ')');
-      option.value = member.index;
-      return option;
-    }));
-    byId('unity-diff-run').disabled = false;
-    byId('unity-diff-output').hidden = true;
-  });
+  perform('Opening Unity candidate…', () => loadUnityCandidate(file));
 });
 byId('unity-diff-form').addEventListener('submit', event => {
   event.preventDefault();
   perform('Comparing Unity objects…', async () => {
     const result = await call('unity-diff', { index: Number(byId('unity-diff-member').value),
       pathId: byId('unity-diff-id').value.trim() });
-    unityDiff = result;
-    unityDiffPage = 0;
-    byId('unity-diff-evidence').hidden = true;
-    byId('unity-diff-query').value = '';
-    const c = result.coverage;
-    byId('unity-diff-coverage').textContent =
-      result.baseline + ' → ' + (result.candidateContainer ? result.candidateContainer + ' › ' : '') + result.candidate +
-      ' · Object tables ' + c.beforeIndexed + '/' + c.beforeDeclared + ' and ' + c.afterIndexed + '/' + c.afterDeclared +
-      ' · ' + c.pairs + ' payload pairs checked · ' + c.fieldPairs + ' field comparisons (' +
-      c.partialFieldPairs + ' partial) · ' + result.counts.unknown + ' unresolved' +
-      (c.omittedRows ? ' · ' + c.omittedRows + ' object rows omitted' : '') +
-      (c.omittedFields ? ' · ' + c.omittedFields + ' field changes omitted' : '');
-    definitions(byId('unity-diff-counts'), Object.fromEntries(Object.entries(result.counts)
-      .filter(([, value]) => value > 0).map(([key, value]) => [unityDiffLabels[key], digits.format(value)])));
-    renderUnityDiff();
-    byId('unity-diff-output').hidden = false;
+    showUnityDiff(result);
   });
 });
 byId('unity-diff-query').addEventListener('input', () => { unityDiffPage = 0; renderUnityDiff(); });
@@ -720,22 +730,53 @@ function findBytes(offset, query, mode) {
   });
 }
 
+async function loadRoot(file) {
+  const result = await call('open', { file });
+  inventory = undefined;
+  apkSet = undefined;
+  byId('apk-set-abi').value = '';
+  byId('apk-set-filter').value = '';
+  renderApkSet();
+  renderInventory();
+  show(result);
+}
+
 function open(file) {
   if (file) perform('Inspecting file…', async () => {
-    const result = await call('open', { file });
-    inventory = undefined;
-    apkSet = undefined;
-    byId('apk-set-abi').value = '';
-    byId('apk-set-filter').value = '';
-    renderApkSet();
-    renderInventory();
-    show(result);
+    await loadRoot(file);
     byId('filename').scrollIntoView({ block: 'center' });
+  });
+}
+
+function runDemo(kind) {
+  return perform('Opening synthetic demo files…', async () => {
+    const { demoUnity, demoArchive } = await import('./demo-fixtures.mjs?v=0.12.1');
+    const [file, candidate] = kind === 'unity' ? demoUnity() : demoArchive();
+    await loadRoot(file);
+    if (kind === 'unity') {
+      await loadUnityCandidate(candidate);
+      const result = await call('unity-diff');
+      showUnityDiff(result);
+      setTab('unity-diff', true);
+      const changed = result.rows.find(row => row.fieldDiff?.changes);
+      if (changed) renderUnityEvidence(changed, false);
+    } else {
+      const result = await call('compare', { file: candidate, nested: true, verifyPayloads: true });
+      showComparison(result);
+      if (result.nested?.groups.length) {
+        byId('comparison-scope').value = '1';
+        renderComparison();
+      }
+    }
+    byId('workspace').scrollIntoView({ block: 'start' });
+    return 'Demo analysis ready · Synthetic files';
   });
 }
 
 const input = byId('file');
 byId('choose').addEventListener('click', () => input.click());
+byId('demo-unity').addEventListener('click', () => runDemo('unity'));
+byId('demo-archive').addEventListener('click', () => runDemo('archive'));
 input.addEventListener('change', () => {
   open(input.files[0]);
   input.value = '';
@@ -1244,3 +1285,6 @@ byId('apk-set-filter').addEventListener('input', renderApkSet);
 byId('apk-notes-prev').addEventListener('click', () => { apkNotesPage--; renderApkSet(); });
 byId('apk-notes-next').addEventListener('click', () => { apkNotesPage++; renderApkSet(); });
 byId('apk-set-export').addEventListener('click', () => downloadJson(apkSet, apkSet.name, '.gameautopsy-apk-set.json'));
+
+const demo = new URLSearchParams(location.search).get('demo');
+if (demo === 'unity' || demo === 'archive') runDemo(demo);

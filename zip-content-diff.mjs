@@ -1,6 +1,6 @@
-import { compareBytes } from './binary-diff.mjs?v=0.12.0';
-import { entriesByName } from './compare.mjs?v=0.12.0';
-import { MiB, openZipMember } from './formats.mjs?v=0.12.0';
+import { compareBytes } from './binary-diff.mjs?v=0.12.1';
+import { entriesByName } from './compare.mjs?v=0.12.1';
+import { MiB, openZipMember } from './formats.mjs?v=0.12.1';
 
 const maxPairs = 512;
 const maxPairsPerArchive = 256;

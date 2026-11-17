@@ -1,5 +1,5 @@
-import { MiB } from './formats.mjs?v=0.12.0';
-import { archiveFormat, maxMember, openMember } from './archive-members.mjs?v=0.12.0';
+import { MiB } from './formats.mjs?v=0.12.1';
+import { archiveFormat, maxMember, openMember } from './archive-members.mjs?v=0.12.1';
 
 const maxDepth = 4;
 const maxContainers = 48;

@@ -1,0 +1,161 @@
+{
+  "schema": "gameautopsy/unity-diff/1",
+  "baseline": "demo-before.assets",
+  "candidate": "demo-after.assets",
+  "baselinePath": [
+    "demo-before.assets"
+  ],
+  "candidatePath": [
+    "demo-after.assets"
+  ],
+  "counts": {
+    "added": 1,
+    "removed": 1,
+    "classChanged": 0,
+    "fieldsChanged": 1,
+    "fieldsEqual": 0,
+    "bytesChanged": 0,
+    "metadataChanged": 0,
+    "moved": 1,
+    "byteEqual": 0,
+    "unknown": 0
+  },
+  "rows": [
+    {
+      "pathId": "3",
+      "status": "fieldsChanged",
+      "before": {
+        "classId": 1,
+        "className": "GameObject",
+        "typeHash": "00000000000000000000000000000000",
+        "offset": 304,
+        "size": 4
+      },
+      "after": {
+        "classId": 1,
+        "className": "GameObject",
+        "typeHash": "00000000000000000000000000000000",
+        "offset": 336,
+        "size": 4
+      },
+      "bytes": {
+        "equal": false,
+        "firstDifference": 0,
+        "changed": 1,
+        "beforeOnly": 0,
+        "afterOnly": 0
+      },
+      "moved": true,
+      "metadataChanged": false,
+      "fieldDiff": {
+        "available": true,
+        "complete": true,
+        "beforeStatus": "complete",
+        "afterStatus": "complete",
+        "warnings": {
+          "before": [],
+          "after": []
+        },
+        "changes": 1,
+        "unknownFields": 0,
+        "comparedFields": 0,
+        "omitted": 0,
+        "fields": [
+          {
+            "path": [
+              "m_Layer"
+            ],
+            "occurrence": 0,
+            "kind": "valueChanged",
+            "before": {
+              "type": "unsigned int",
+              "offset": 304,
+              "size": 4,
+              "value": 0
+            },
+            "after": {
+              "type": "unsigned int",
+              "offset": 336,
+              "size": 4,
+              "value": 7
+            }
+          }
+        ]
+      }
+    },
+    {
+      "pathId": "5",
+      "status": "moved",
+      "before": {
+        "classId": 1,
+        "className": "GameObject",
+        "typeHash": "00000000000000000000000000000000",
+        "offset": 308,
+        "size": 4
+      },
+      "after": {
+        "classId": 1,
+        "className": "GameObject",
+        "typeHash": "00000000000000000000000000000000",
+        "offset": 340,
+        "size": 4
+      },
+      "bytes": {
+        "equal": true,
+        "firstDifference": null,
+        "changed": 0,
+        "beforeOnly": 0,
+        "afterOnly": 0
+      }
+    },
+    {
+      "pathId": "8",
+      "status": "removed",
+      "before": {
+        "classId": 1,
+        "className": "GameObject",
+        "typeHash": "00000000000000000000000000000000",
+        "offset": 312,
+        "size": 4
+      },
+      "after": null
+    },
+    {
+      "pathId": "11",
+      "status": "added",
+      "before": null,
+      "after": {
+        "classId": 1,
+        "className": "GameObject",
+        "typeHash": "00000000000000000000000000000000",
+        "offset": 344,
+        "size": 4
+      }
+    }
+  ],
+  "coverage": {
+    "matchedBy": "pathId",
+    "limits": {
+      "pairs": 768,
+      "bytes": 134217728,
+      "objectBytes": 8388608,
+      "rows": 5000,
+      "fieldsPerObject": 40,
+      "fieldsTotal": 1200,
+      "fieldReportChars": 2097152
+    },
+    "beforeIndexed": 3,
+    "beforeDeclared": 3,
+    "afterIndexed": 3,
+    "afterDeclared": 3,
+    "pathsConsidered": 4,
+    "pairs": 2,
+    "bytesBudgeted": 24,
+    "fieldPairs": 1,
+    "partialFieldPairs": 0,
+    "fieldRows": 1,
+    "omittedFields": 0,
+    "omittedRows": 0,
+    "skipped": {}
+  }
+}
