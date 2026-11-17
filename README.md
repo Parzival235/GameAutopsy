@@ -4,6 +4,8 @@ Find what changed between two builds of a game. Inspect APKs, Unity assets, Godo
 
 **[Open GameAutopsy](https://parzival235.github.io/GameAutopsy/)** · [Try Unity field diff](https://parzival235.github.io/GameAutopsy/?demo=unity) · [Try nested ZIP diff](https://parzival235.github.io/GameAutopsy/?demo=archive) · [User guide](docs/manual.md)
 
+[![GameAutopsy compares two Unity files and shows m_Layer changing from 0 to 7 at the reported byte offsets.](docs/unity-diff.jpg)](https://parzival235.github.io/GameAutopsy/?demo=unity)
+
 In the Unity demo, object **Path ID 3** changes from layer **0** to **7**. Open **Hex** on the baseline field or [view the example comparison report](docs/example-unity-diff.json) for both byte offsets and comparison coverage. The ZIP demo finds the change inside `assets/config.zip` and lets you open both versions of `settings.json`. Both demos generate synthetic files in your browser.
 
 ## What you can inspect
